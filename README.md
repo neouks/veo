@@ -1,5 +1,9 @@
 # VEO 主被动扫描工具
-VEO 是一款专注于端口扫描、目录探测、指纹识别和敏感信息发现。**欢迎使用任何同类型工具进行准确性和误报对比**。
+## 只做三件事
+
+**端口扫描、目录探测、指纹识别**
+
+**欢迎使用任何同类型工具进行准确性和误报对比**。
 
 ---
 [![asciicast](https://asciinema.org/a/nNomQmVMS7vfU6TKbPtCI7Nd0.svg)](https://asciinema.org/a/nNomQmVMS7vfU6TKbPtCI7Nd0)
