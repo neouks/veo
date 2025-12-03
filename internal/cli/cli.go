@@ -30,7 +30,7 @@ import (
 
 	// "os/exec" // removed: masscan执行迁移至模块
 	portscanpkg "veo/pkg/portscan"
-	masscanrunner "veo/pkg/portscan/masscan"
+	gogoscanner "veo/pkg/portscan/gogo"
 	portservice "veo/pkg/portscan/service"
 	report "veo/pkg/reporter"
 )
@@ -1465,10 +1465,13 @@ func logPortScanBanner(ports string, rate int) {
 }
 
 func runPortScanAndCollect(args *CLIArgs, baseTargets []string, announce bool, printResults bool) ([]portscanpkg.OpenPortResult, string, int, error) {
-	effectiveRate := masscanrunner.ComputeEffectiveRate(args.Rate)
+	effectiveRate := args.Rate
+	if effectiveRate <= 0 {
+		effectiveRate = gogoscanner.DefaultRate
+	}
 	portsExpr, portSource, err := resolvePortExpression(args)
 	if err != nil {
-		fallback := masscanrunner.DerivePortsFromTargets(baseTargets)
+		fallback := portscanpkg.DerivePortsFromTargets(baseTargets)
 		if strings.TrimSpace(fallback) == "" {
 			return nil, "", effectiveRate, err
 		}
@@ -1485,7 +1488,7 @@ func runPortScanAndCollect(args *CLIArgs, baseTargets []string, announce bool, p
 			targetList = args.Targets
 		}
 		var resolveErr error
-		msTargets, resolveErr = masscanrunner.ResolveTargetsToIPs(targetList)
+		msTargets, resolveErr = portscanpkg.ResolveTargetsToIPs(targetList)
 		if resolveErr != nil {
 			return nil, portsExpr, effectiveRate, fmt.Errorf("目标解析失败: %v", resolveErr)
 		}
@@ -1496,13 +1499,19 @@ func runPortScanAndCollect(args *CLIArgs, baseTargets []string, announce bool, p
 		logPortScanBanner(portsExpr, effectiveRate)
 	}
 
-	opts := portscanpkg.Options{
-		Ports:      portsExpr,
-		Rate:       effectiveRate,
-		Targets:    msTargets,
-		TargetFile: args.TargetFile,
+	var scannerOpts []gogoscanner.Option
+	if effectiveRate > 0 {
+		scannerOpts = append(scannerOpts, gogoscanner.WithRate(effectiveRate))
 	}
-	results, err := masscanrunner.Run(opts)
+	if args.Timeout > 0 {
+		scannerOpts = append(scannerOpts, gogoscanner.WithTimeout(time.Duration(args.Timeout)*time.Second))
+	}
+	if args.Threads > 0 {
+		scannerOpts = append(scannerOpts, gogoscanner.WithThreads(args.Threads))
+	}
+
+	scanner := gogoscanner.NewScanner(scannerOpts...)
+	results, err := scanner.Scan(context.Background(), msTargets, portsExpr)
 	if err != nil {
 		return nil, portsExpr, effectiveRate, err
 	}

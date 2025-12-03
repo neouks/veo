@@ -1,15 +1,6 @@
 package service
 
 import (
-	"bufio"
-	"fmt"
-	"net"
-	"strings"
-	"time"
-
-	"veo/pkg/utils/logger"
-	"veo/pkg/utils/useragent"
-
 	"regexp"
 )
 
@@ -68,45 +59,6 @@ func PrimaryServiceHints() map[int]string {
 		hints[int(port)] = services[0]
 	}
 	return hints
-}
-
-// HTTPFallbackProbe 尝试对指定 host:port 发送最小化 HTTP 请求，返回是否匹配 HTTP 响应头。
-// 用于服务识别阶段处理 Banner 返回 "unknown" 但端口仍可能是 HTTP 的场景。
-func HTTPFallbackProbe(host string, port int, timeout time.Duration) bool {
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	conn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return false
-	}
-
-	requestHost := host
-	if port != 80 && port != 0 {
-		requestHost = fmt.Sprintf("%s:%d", host, port)
-	}
-	ua := useragent.Pick()
-	if ua == "" {
-		ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0"
-	}
-	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\nConnection: close\r\n\r\n", requestHost, ua)
-	if _, err := conn.Write([]byte(req)); err != nil {
-		return false
-	}
-
-	reader := bufio.NewReader(conn)
-	buf := make([]byte, 4096)
-	n, err := reader.Read(buf)
-	if n <= 0 || err != nil {
-		return false
-	}
-	data := string(buf[:n])
-	logger.Debugf("HTTP fallback raw response %s:%d => %q", host, port, data)
-	dataUpper := strings.ToUpper(data)
-	return strings.Contains(dataUpper, "HTTP/")
 }
 
 func init() {

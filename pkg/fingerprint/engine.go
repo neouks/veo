@@ -879,7 +879,7 @@ func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response 
 		if title == "" {
 			title = "无标题"
 		}
-		logMsg.WriteString(formatter.FormatTitle(title))
+		logMsg.WriteString(formatter.FormatFingerprintTitle(title))
 		logMsg.WriteString(" ")
 		logMsg.WriteString(formatter.FormatContentType(response.ContentType))
 

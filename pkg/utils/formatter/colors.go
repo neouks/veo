@@ -25,6 +25,7 @@ import (
 const (
 	ColorReset  = "\033[0m"  // 重置
 	ColorGreen  = "\033[32m" // 绿色
+	ColorLightRed   = "\033[91m" // 浅红色
 	ColorRed    = "\033[31m" // 红色
 	ColorYellow = "\033[33m" // 黄色
 	ColorBlue   = "\033[34m" // 蓝色
@@ -114,6 +115,24 @@ func FormatTitle(title string) string {
 		return fmt.Sprintf("[%s]", title)
 	}
 	return fmt.Sprintf("[%s]", title) + ColorReset
+}
+
+// FormatFingerprintTitle 格式化指纹匹配后的标题显示（浅红色，不加粗）
+func FormatFingerprintTitle(title string) string {
+	// 检查标题是否已经包含方括号
+	if strings.HasPrefix(title, "[") && strings.HasSuffix(title, "]") {
+		if !shouldUseColors() {
+			return title
+		}
+		// 使用浅红色显示
+		return ColorLightRed + title + ColorReset
+	}
+
+	if !shouldUseColors() {
+		return fmt.Sprintf("[%s]", title)
+	}
+	// 添加方括号并使用浅红色显示
+	return ColorLightRed + fmt.Sprintf("[%s]", title) + ColorReset
 }
 
 // FormatNumber 格式化数字显示（移除颜色，使用默认颜色）

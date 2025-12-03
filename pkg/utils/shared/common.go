@@ -1,8 +1,13 @@
 package shared
 
 import (
+	"encoding/binary"
+	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -187,4 +192,171 @@ func (c *FileExtensionChecker) IsStaticFile(urlPath string) bool {
 		}
 	}
 	return false
+}
+
+// ParseTargets 解析目标列表，支持 CIDR、IP范围、域名、URL
+// 返回去重后的IP列表
+func ParseTargets(targets []string) ([]string, error) {
+	uniqueIPs := make(map[string]struct{})
+
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+
+		// 1. 尝试解析为 CIDR
+		if _, ipnet, err := net.ParseCIDR(target); err == nil {
+			ips := cidrToIPs(ipnet)
+			for _, ip := range ips {
+				uniqueIPs[ip] = struct{}{}
+			}
+			continue
+		}
+
+		// 2. 尝试解析为 IP 范围 (e.g., 192.168.1.1-10, 192.168.1.1-192.168.1.10)
+		if strings.Contains(target, "-") {
+			ips, err := rangeToIPs(target)
+			if err == nil && len(ips) > 0 {
+				for _, ip := range ips {
+					uniqueIPs[ip] = struct{}{}
+				}
+				continue
+			}
+			// 如果解析范围失败，可能是一个带横杠的域名，继续后续处理
+		}
+
+		// 3. 处理 URL/域名/单一IP
+		// 提取 Host
+		host := target
+		if strings.Contains(target, "://") {
+			if u, err := url.Parse(target); err == nil {
+				host = u.Host
+			}
+		}
+		// 去除端口
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+
+		// 解析 IP
+		if ip := net.ParseIP(host); ip != nil {
+			uniqueIPs[ip.String()] = struct{}{}
+		} else {
+			// 域名解析
+			if ips, err := net.LookupIP(host); err == nil {
+				for _, ip := range ips {
+					// 优先使用 IPv4
+					if ip4 := ip.To4(); ip4 != nil {
+						uniqueIPs[ip4.String()] = struct{}{}
+					} else {
+						uniqueIPs[ip.String()] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	if len(uniqueIPs) == 0 {
+		return nil, fmt.Errorf("未找到有效的 IP 目标")
+	}
+
+	// 转换为切片并排序
+	result := make([]string, 0, len(uniqueIPs))
+	for ip := range uniqueIPs {
+		result = append(result, ip)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// cidrToIPs 将 CIDR 转换为 IP 列表
+func cidrToIPs(n *net.IPNet) []string {
+	var ips []string
+	for ip := n.IP.Mask(n.Mask); n.Contains(ip); inc(ip) {
+		ips = append(ips, ip.String())
+	}
+	return ips
+}
+
+func inc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
+
+// rangeToIPs 解析 IP 范围
+func rangeToIPs(target string) ([]string, error) {
+	parts := strings.Split(target, "-")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("无效的范围格式")
+	}
+	startIPStr := strings.TrimSpace(parts[0])
+	endPart := strings.TrimSpace(parts[1])
+
+	startIP := net.ParseIP(startIPStr)
+	if startIP == nil {
+		return nil, fmt.Errorf("无效的起始 IP")
+	}
+	startIP = startIP.To4()
+	if startIP == nil {
+		return nil, fmt.Errorf("仅支持 IPv4 范围")
+	}
+
+	var endIP net.IP
+
+	// 检查 endPart 是完整 IP 还是数字后缀
+	if strings.Contains(endPart, ".") {
+		endIP = net.ParseIP(endPart)
+		if endIP == nil {
+			return nil, fmt.Errorf("无效的结束 IP")
+		}
+		endIP = endIP.To4()
+	} else {
+		// 数字后缀模式 (e.g. 192.168.1.1-10)
+		endNum, err := strconv.Atoi(endPart)
+		if err != nil {
+			return nil, fmt.Errorf("无效的结束后缀")
+		}
+		// 构造结束 IP
+		endIP = make(net.IP, 4)
+		copy(endIP, startIP)
+		endIP[3] = byte(endNum)
+	}
+
+	if endIP == nil {
+		return nil, fmt.Errorf("无法解析结束 IP")
+	}
+
+	// 生成范围内的所有 IP
+	var ips []string
+	startVal := ipToUInt32(startIP)
+	endVal := ipToUInt32(endIP)
+
+	if startVal > endVal {
+		return nil, fmt.Errorf("起始 IP 大于结束 IP")
+	}
+
+	// 限制一次生成的 IP 数量，防止 OOM
+	if endVal-startVal > 65536 {
+		return nil, fmt.Errorf("IP 范围过大 (>65536)")
+	}
+
+	for i := startVal; i <= endVal; i++ {
+		ip := make(net.IP, 4)
+		binary.BigEndian.PutUint32(ip, i)
+		ips = append(ips, ip.String())
+	}
+
+	return ips, nil
+}
+
+func ipToUInt32(ip net.IP) uint32 {
+	if len(ip) == 16 {
+		return binary.BigEndian.Uint32(ip[12:16])
+	}
+	return binary.BigEndian.Uint32(ip)
 }

@@ -963,8 +963,6 @@
 /s.aspx
 /s.jsp
 /s.jspx
-/?userid=1
-/?roleid=1
 /s.php
 /shell.asp
 /shell.aspx
@@ -997,10 +995,11 @@
 /x.jsp
 /x.jspx
 /Admin/
+/IMEE-GlobeServer/
 /API/
 /nacos/
 /WebReport/
-/geoserver/
+/geoserver/web/
 /axis/
 /editors/
 /zentao/
@@ -2396,7 +2395,7 @@
 /apidocs/swagger.json
 /article?id=${7*7}
 /article?id=66
-/beans1
+/beans
 /channels
 /clients
 /clients/actuator/system/showOsInfo

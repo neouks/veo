@@ -1,11 +1,11 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
-	"errors"
+	"fmt"
 	"net"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +17,7 @@ import (
 	"veo/pkg/utils/useragent"
 )
 
+// Action 动作类型
 type Action uint8
 
 const (
@@ -47,301 +48,272 @@ var readBufPool = &sync.Pool{
 	},
 }
 
-// PortIdentify 端口识别
-func PortIdentify(network string, ip net.IP, _port uint16, dailTimeout time.Duration) (serviceName string, version string, banner []byte, isDailErr bool) {
-	matchedRule := make(map[string]struct{})
-	recordMatched := func(s string) {
-		matchedRule[s] = struct{}{}
-		if gf, ok := groupFlows[s]; ok {
-			for _, s2 := range gf {
-				matchedRule[s2] = struct{}{}
+// PortIdentify 端口识别主入口
+func PortIdentify(network string, ip net.IP, port uint16, timeout time.Duration) (string, string, []byte, bool) {
+	addr := net.JoinHostPort(ip.String(), strconv.Itoa(int(port)))
+	matched := make(map[string]struct{})
+
+	// 辅助函数：标记服务已检查
+	markChecked := func(s string) {
+		matched[s] = struct{}{}
+		for _, g := range groupFlows[s] {
+			matched[g] = struct{}{}
+		}
+	}
+
+	// 1. 优先端口检查
+	if services, ok := portServiceOrder[port]; ok {
+		for _, s := range services {
+			markChecked(s)
+			srv, ver, b, err := matchServiceRule(network, addr, s, timeout, ip, port)
+			if srv != "" {
+				logger.Debugf("priority port matched %s:%d => %s", ip, port, srv)
+				return srv, ver, b, false
+			}
+			if err {
+				return "unknown", "", b, true
 			}
 		}
 	}
 
-	unknown := "unknown"
-	var sn, ver string
-
-	defer func() {
-		if sn == "http" && bytes.HasPrefix(banner, []byte("HTTP/1.1 400")) {
-			sn2, ver2, banner2, isDailErr2 := matchRule(network, ip, _port, "https", dailTimeout)
-			if !isDailErr && sn2 != "" {
-				sn = sn2
-				ver = ver2
-				banner = banner2
-				isDailErr = isDailErr2
-			}
-		}
-		serviceName = sn
-		version = ver
-	}()
-
-	if serviceNames, ok := portServiceOrder[_port]; ok {
-		for _, service := range serviceNames {
-			recordMatched(service)
-			sn, ver, banner, isDailErr = matchRule(network, ip, _port, service, dailTimeout)
-			if sn != "" {
-				logger.Debugf("priority port order matched %s:%d => %s %s banner=%q", ip.String(), _port, sn, ver, previewBanner(banner))
-				return sn, ver, banner, false
-			} else if isDailErr {
-				return unknown, "", banner, isDailErr
-			}
-		}
-	}
-
-	var lastDailTime time.Duration
-
+	// 2. 纯接收模式优化 (Only-Recv)
+	// 建立一次连接，读取 Banner，尝试匹配所有 Only-Recv 规则
 	{
-		var conn net.Conn
-		var n int
-		buf := readBufPool.Get().([]byte)
-		defer func() {
-			readBufPool.Put(buf)
-		}()
-		address := net.JoinHostPort(ip.String(), strconv.Itoa(int(_port)))
-		now := time.Now()
-		conn, _ = net.DialTimeout(network, address, dailTimeout)
-		if conn == nil {
-			return unknown, "", banner, true
+		srv, ver, b, err := checkOnlyRecv(network, addr, ip, port, timeout, matched)
+		if srv != "" {
+			return srv, ver, b, false
 		}
-		lastDailTime = time.Since(now) * 2
-		if lastDailTime < dailTimeout {
-			dailTimeout = lastDailTime
-			if dailTimeout < 250*time.Millisecond {
-				dailTimeout = 250 * time.Millisecond
+		if err {
+			return "unknown", "", b, true
+		}
+		// 标记所有 Only-Recv 服务为已检查
+		for _, s := range onlyRecv {
+			markChecked(s)
+		}
+	}
+
+	// 3. 优先服务检查
+	for _, s := range serviceOrder {
+		if _, ok := matched[s]; ok {
+			continue
+		}
+		markChecked(s)
+		srv, ver, b, err := matchServiceRule(network, addr, s, timeout, ip, port)
+		if srv != "" {
+			return srv, ver, b, false
+		}
+		if err {
+			return "unknown", "", b, true
+		}
+	}
+
+	// 4. 剩余服务回退检查
+	for s := range serviceRules {
+		if _, ok := matched[s]; ok {
+			continue
+		}
+		srv, ver, b, err := matchServiceRule(network, addr, s, timeout, ip, port)
+		if srv != "" {
+			return srv, ver, b, false
+		}
+		if err {
+			return "unknown", "", b, true
+		}
+	}
+
+	return "unknown", "", nil, false
+}
+
+// checkOnlyRecv 执行纯接收模式检查
+func checkOnlyRecv(network, addr string, ip net.IP, port uint16, timeout time.Duration, matched map[string]struct{}) (string, string, []byte, bool) {
+	conn, err := net.DialTimeout(network, addr, timeout)
+	if err != nil {
+		return "", "", nil, true
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(timeout))
+
+	buf := readBufPool.Get().([]byte)
+	defer readBufPool.Put(buf)
+
+	n, err := conn.Read(buf)
+	if n <= 0 {
+		return "", "", nil, false
+	}
+	banner := make([]byte, n)
+	copy(banner, buf[:n])
+
+	logger.Debugf("recv banner %s:%d => %q", ip, port, previewBanner(banner))
+
+	// 检查 Only-Recv 规则
+	for _, s := range onlyRecv {
+		if _, ok := matched[s]; ok {
+			continue
+		}
+		if rule, ok := serviceRules[s]; ok {
+			for _, group := range rule.DataGroup {
+				if ok, ver := matchRuleData(banner, ip, port, group, ""); ok {
+					return s, ver, banner, false
+				}
 			}
 		}
-		n, _ = read(conn, buf, dailTimeout)
-		conn.Close()
-		if n != 0 {
-			banner = make([]byte, n)
-			copy(banner, buf[:n])
-			logger.Debugf("only-recv banner %s:%d => %q", ip.String(), _port, previewBanner(buf[:n]))
-			for _, service := range onlyRecv {
-				_, ok := matchedRule[service]
-				if ok {
-					continue
+	}
+
+	// 检查 doneRecvFinger (正则直接匹配)
+	utf8Banner := convert2utf8(string(banner))
+	for s, regex := range doneRecvFinger {
+		matches := regex.FindStringSubmatch(utf8Banner)
+		if len(matches) > 0 {
+			ver := ""
+			if len(matches) > 1 {
+				ver = matches[1]
+			}
+			return s, ver, banner, false
+		}
+	}
+
+	return "", "", banner, false
+}
+
+// matchServiceRule 匹配单个服务规则
+func matchServiceRule(network, addr, serviceName string, timeout time.Duration, ip net.IP, port uint16) (string, string, []byte, bool) {
+	rule, ok := serviceRules[serviceName]
+	if !ok {
+		return "", "", nil, false
+	}
+
+	dialer := &net.Dialer{Timeout: timeout}
+	var conn net.Conn
+	var err error
+
+	if rule.Tls {
+		conn, err = tls.DialWithDialer(dialer, network, addr, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS10})
+	} else {
+		conn, err = dialer.Dial(network, addr)
+	}
+
+	if err != nil {
+		// 检查是否为连接错误（忽略 TLS 握手错误，当作服务不匹配）
+		if rule.Tls {
+			// 如果是 TLS 握手导致的 remote error，可能不是 TLS 服务，但也证明端口开放
+			// 这里简单处理：连接失败视为该服务不匹配，但如果 TCP 连上了 TLS 握手失败，是否算 DialError？
+			// 原逻辑：如果是 IO Timeout 或 Refused，算 DialErr。其他算不匹配。
+			if strings.Contains(err.Error(), ioTimeoutStr) || strings.Contains(err.Error(), refusedStr) {
+				return "", "", nil, true
+			}
+			return "", "", nil, false
+		}
+		return "", "", nil, true
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	buf := readBufPool.Get().([]byte)
+	defer readBufPool.Put(buf)
+
+	ua := useragent.Pick()
+	if ua == "" {
+		ua = useragent.Primary()
+	}
+
+	for _, group := range rule.DataGroup {
+		if group.Action == ActionSend {
+			payload := replacePlaceholders(group.Data, ip, port, ua)
+			if _, err := conn.Write(payload); err != nil {
+				return "", "", nil, false
+			}
+		} else {
+			n, err := conn.Read(buf)
+			if n > 0 {
+				banner := make([]byte, n)
+				copy(banner, buf[:n])
+
+				logger.Debugf("recv banner %s:%d (%s) => %q", ip, port, serviceName, previewBanner(banner))
+
+				if ok, ver := matchRuleData(banner, ip, port, group, ua); ok {
+					return serviceName, ver, banner, false
 				}
-				for _, rule := range serviceRules[service].DataGroup {
-					if matched, v := matchRuleWithBuf(buf[:n], ip, _port, rule, ""); matched {
-						return service, v, banner, false
+
+				// 检查 Group Flows (关联服务)
+				for _, s := range groupFlows[serviceName] {
+					if subRule, ok := serviceRules[s]; ok {
+						for _, subGroup := range subRule.DataGroup {
+							if subGroup.Action == ActionRecv {
+								if ok, ver := matchRuleData(banner, ip, port, subGroup, ua); ok {
+									return s, ver, banner, false
+								}
+							}
+						}
 					}
 				}
 
+				// HTTP -> HTTPS 回退逻辑
+				if serviceName == "http" && bytes.HasPrefix(banner, []byte("HTTP/1.1 400")) {
+					return matchServiceRule(network, addr, "https", timeout, ip, port)
+				}
+
+				return "", "", banner, false
+			}
+			if err != nil {
+				break
 			}
 		}
-		for _, service := range onlyRecv {
-			recordMatched(service)
-		}
 	}
-
-	for _, service := range serviceOrder {
-		_, ok := matchedRule[service]
-		if ok {
-			continue
-		}
-		recordMatched(service)
-		sn, ver, banner, isDailErr = matchRule(network, ip, _port, service, dailTimeout)
-		if sn != "" {
-			logger.Debugf("priority service matched %s:%d => %s %s banner=%q", ip.String(), _port, sn, ver, previewBanner(banner))
-			return sn, ver, banner, false
-		} else if isDailErr {
-			return unknown, "", banner, true
-		}
-	}
-
-	for service := range serviceRules {
-		_, ok := matchedRule[service]
-		if ok {
-			continue
-		}
-		sn, ver, banner, isDailErr = matchRule(network, ip, _port, service, dailTimeout)
-		if sn != "" {
-			logger.Debugf("fallback service matched %s:%d => %s %s banner=%q", ip.String(), _port, sn, ver, previewBanner(banner))
-			return sn, ver, banner, false
-		} else if isDailErr {
-			return unknown, "", banner, true
-		}
-	}
-
-	return unknown, "", banner, false
+	return "", "", nil, false
 }
 
-func matchRuleWithBuf(buf []byte, ip net.IP, _port uint16, rule ruleData, ua string) (bool, string) {
-	data := []byte("")
+// matchRuleData 匹配规则数据
+func matchRuleData(buf []byte, ip net.IP, port uint16, rule ruleData, ua string) (bool, string) {
+	// 字节匹配
 	if rule.Data != nil {
-		data = bytes.Replace(rule.Data, []byte("{IP}"), []byte(ip.String()), -1)
-		data = bytes.Replace(data, []byte("{PORT}"), []byte(strconv.Itoa(int(_port))), -1)
-		if ua != "" {
-			data = bytes.Replace(data, []byte("{UA}"), []byte(ua), -1)
-		} else {
-			data = bytes.Replace(data, []byte("{UA}"), []byte{}, -1)
+		target := replacePlaceholders(rule.Data, ip, port, ua)
+		if len(target) > 0 && bytes.Contains(buf, target) {
+			return true, ""
 		}
 	}
+	// 正则匹配
 	if rule.Regexps != nil {
-		for _, _regex := range rule.Regexps {
-			matches := _regex.FindStringSubmatch(convert2utf8(string(buf)))
+		utf8Str := convert2utf8(string(buf))
+		for _, re := range rule.Regexps {
+			matches := re.FindStringSubmatch(utf8Str)
 			if len(matches) > 0 {
-				version := ""
+				ver := ""
 				if len(matches) > 1 {
-					version = matches[1]
+					ver = matches[1]
 				}
-				return true, version
+				return true, ver
 			}
 		}
-	}
-	if len(data) != 0 && bytes.Contains(buf, data) {
-		return true, ""
 	}
 	return false, ""
 }
 
-func matchRule(network string, ip net.IP, _port uint16, serviceName string, dailTimeout time.Duration) (serviceNameRet string, versionRet string, banner []byte, isDailErr bool) {
-	var err error
-	var isTls bool
-	var conn net.Conn
-	var connTls *tls.Conn
-
-	address := net.JoinHostPort(ip.String(), strconv.Itoa(int(_port)))
-
-	serviceRule2 := serviceRules[serviceName]
-	flowsService := groupFlows[serviceName]
-
-	userAgent := useragent.Pick()
-	if userAgent == "" {
-		userAgent = useragent.Primary()
+// replacePlaceholders 替换占位符
+func replacePlaceholders(data []byte, ip net.IP, port uint16, ua string) []byte {
+	if data == nil {
+		return nil
 	}
-
-	if serviceRule2.Tls {
-		connTls, err = tls.DialWithDialer(&net.Dialer{Timeout: dailTimeout}, network, address, &tls.Config{
-			InsecureSkipVerify: true,
-			MinVersion:         tls.VersionTLS10,
-		})
-		if err != nil {
-			if strings.HasSuffix(err.Error(), ioTimeoutStr) || strings.Contains(err.Error(), refusedStr) {
-				isDailErr = true
-				return
-			}
-			var oe *net.OpError
-			if errors.As(err, &oe) && oe.Op == "remote error" && reflect.TypeOf(oe.Err).Name() == "alert" {
-				serviceNameRet = "tls"
-			}
-			return
-		}
-		defer connTls.Close()
-		isTls = true
+	res := bytes.Replace(data, []byte("{IP}"), []byte(ip.String()), -1)
+	res = bytes.Replace(res, []byte("{PORT}"), []byte(strconv.Itoa(int(port))), -1)
+	if ua != "" {
+		res = bytes.Replace(res, []byte("{UA}"), []byte(ua), -1)
 	} else {
-		conn, err = net.DialTimeout(network, address, dailTimeout)
-		if conn == nil {
-			isDailErr = true
-			return
-		}
-		defer conn.Close()
+		res = bytes.Replace(res, []byte("{UA}"), []byte{}, -1)
 	}
-
-	buf := readBufPool.Get().([]byte)
-	defer func() {
-		readBufPool.Put(buf)
-	}()
-
-	data := []byte("")
-	for _, rule := range serviceRule2.DataGroup {
-		if rule.Data != nil {
-			data = bytes.Replace(rule.Data, []byte("{IP}"), []byte(ip.String()), -1)
-			data = bytes.Replace(data, []byte("{PORT}"), []byte(strconv.Itoa(int(_port))), -1)
-			if userAgent != "" {
-				data = bytes.Replace(data, []byte("{UA}"), []byte(userAgent), -1)
-			} else {
-				data = bytes.Replace(data, []byte("{UA}"), []byte{}, -1)
-			}
-		}
-
-		if rule.Action == ActionSend {
-			if isTls {
-				connTls.SetWriteDeadline(time.Now().Add(dailTimeout))
-				_, err = connTls.Write(data)
-			} else {
-				conn.SetWriteDeadline(time.Now().Add(dailTimeout))
-				_, err = conn.Write(data)
-			}
-			if err != nil {
-				return
-			}
-		} else {
-			var n int
-			if isTls {
-				n, err = read(connTls, buf, dailTimeout)
-			} else {
-				n, err = read(conn, buf, dailTimeout)
-			}
-			if n == 0 {
-				return
-			}
-			banner = make([]byte, n)
-			copy(banner, buf[:n])
-			logger.Debugf("recv banner %s:%d (%s) => %q", ip.String(), _port, serviceName, previewBanner(buf[:n]))
-			if matched, ver := matchRuleWithBuf(buf[:n], ip, _port, rule, userAgent); matched {
-				serviceNameRet = serviceName
-				versionRet = ver
-				logger.Debugf("exact match service=%s version=%s banner=%q", serviceName, ver, previewBanner(buf[:n]))
-				return
-			}
-			for _, s := range flowsService {
-				for _, rule2 := range serviceRules[s].DataGroup {
-					if rule2.Action == ActionSend {
-						continue
-					}
-					if matched, ver := matchRuleWithBuf(buf[:n], ip, _port, rule2, userAgent); matched {
-						logger.Debugf("group match service=%s version=%s banner=%q", s, ver, previewBanner(buf[:n]))
-						serviceNameRet = s
-						versionRet = ver
-						return
-					}
-				}
-			}
-		}
-	}
-
-	if serviceNameRet == "" && len(banner) > 0 {
-		for serviceName, _regex := range doneRecvFinger {
-			matches := _regex.FindStringSubmatch(convert2utf8(string(banner)))
-			if len(matches) > 0 {
-				serviceNameRet = serviceName
-				if len(matches) > 1 {
-					versionRet = matches[1]
-				}
-				logger.Debugf("done-recv regex matched service=%s version=%s banner=%q", serviceName, versionRet, previewBanner(banner))
-			}
-		}
-	}
-
-	return
+	return res
 }
 
-func read(conn interface{}, buf []byte, timeout time.Duration) (int, error) {
-	switch conn.(type) {
-	case net.Conn:
-		conn.(net.Conn).SetReadDeadline(time.Now().Add(timeout))
-		return conn.(net.Conn).Read(buf[:])
-	case *tls.Conn:
-		conn.(*tls.Conn).SetReadDeadline(time.Now().Add(timeout))
-		return conn.(*tls.Conn).Read(buf[:])
-	}
-	return 0, errors.New("unknown type")
-}
-
+// convert2utf8 转换为 UTF-8 字符串，处理无效字符
 func convert2utf8(src string) string {
-	var dst string
-	for i, r := range src {
-		var v string
+	var dst strings.Builder
+	for _, r := range src {
 		if r == utf8.RuneError {
-			v = string(src[i])
+			dst.WriteByte(byte(src[strings.IndexRune(src, r)]))
 		} else {
-			v = string(r)
+			dst.WriteRune(r)
 		}
-		dst += v
 	}
-	return dst
+	return dst.String()
 }
 
 func previewBanner(b []byte) string {
@@ -350,4 +322,42 @@ func previewBanner(b []byte) string {
 		return string(b)
 	}
 	return string(b[:limit]) + "...(truncated)"
+}
+
+// HTTPFallbackProbe 尝试对指定 host:port 发送最小化 HTTP 请求
+func HTTPFallbackProbe(host string, port int, timeout time.Duration) bool {
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return false
+	}
+
+	requestHost := host
+	if port != 80 && port != 0 {
+		requestHost = fmt.Sprintf("%s:%d", host, port)
+	}
+	ua := useragent.Pick()
+	if ua == "" {
+		ua = useragent.Primary()
+	}
+	req := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\nConnection: close\r\n\r\n", requestHost, ua)
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return false
+	}
+
+	reader := bufio.NewReader(conn)
+	buf := make([]byte, 4096)
+	n, err := reader.Read(buf)
+	if n <= 0 || err != nil {
+		return false
+	}
+	data := string(buf[:n])
+	logger.Debugf("HTTP fallback raw response %s:%d => %q", host, port, data)
+	dataUpper := strings.ToUpper(data)
+	return strings.Contains(dataUpper, "HTTP/")
 }

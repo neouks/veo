@@ -20,7 +20,7 @@ import (
 	fingerprintinternal "veo/pkg/fingerprint"
 	portconfig "veo/pkg/portscan"
 	portscanpkg "veo/pkg/portscan"
-	masscanrunner "veo/pkg/portscan/masscan"
+	gogoscanner "veo/pkg/portscan/gogo"
 	portservice "veo/pkg/portscan/service"
 	"veo/pkg/utils/httpclient"
 	"veo/pkg/utils/interfaces"
@@ -157,7 +157,7 @@ func RunPortscanService(req *PortscanRequest) ([]portscanpkg.OpenPortResult, err
 		return nil, err
 	}
 
-	resolvedTargets, err := masscanrunner.ResolveTargetsToIPs(targets)
+	resolvedTargets, err := portscanpkg.ResolveTargetsToIPs(targets)
 	if err != nil {
 		return nil, err
 	}
@@ -165,13 +165,13 @@ func RunPortscanService(req *PortscanRequest) ([]portscanpkg.OpenPortResult, err
 		return nil, errors.New("no valid targets for portscan")
 	}
 
-	opts := portscanpkg.Options{
-		Ports:   portsExpr,
-		Rate:    masscanrunner.ComputeEffectiveRate(req.Config.Rate),
-		Targets: resolvedTargets,
+	var scannerOpts []gogoscanner.Option
+	if req.Config.Rate > 0 {
+		scannerOpts = append(scannerOpts, gogoscanner.WithRate(req.Config.Rate))
 	}
 
-	results, err := masscanrunner.Run(opts)
+	scanner := gogoscanner.NewScanner(scannerOpts...)
+	results, err := scanner.Scan(context.Background(), resolvedTargets, portsExpr)
 	if err != nil {
 		return nil, err
 	}

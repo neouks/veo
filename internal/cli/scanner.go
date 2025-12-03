@@ -16,7 +16,7 @@ import (
 	"veo/pkg/dirscan"
 	"veo/pkg/fingerprint"
 	portscanpkg "veo/pkg/portscan"
-	masscanrunner "veo/pkg/portscan/masscan"
+	gogoscanner "veo/pkg/portscan/gogo"
 	report "veo/pkg/reporter"
 	"veo/pkg/types"
 	"veo/pkg/utils/checkalive"
@@ -1053,7 +1053,7 @@ func (sc *ScanController) runDirscanModule(targets []string) ([]interfaces.HTTPR
 		dictInfo = sc.wordlistPath
 	}
 	// 模块开始前空行，提升可读性
-	logger.Infof("%s", formatter.FormatBold(fmt.Sprintf("Start Dirscan, Loaded Dict: %s", dictInfo)))
+	logger.Infof("Start Dirscan, Loaded Dict: %s", dictInfo)
 	logger.Debugf("开始目录扫描，目标数量: %d", len(targets))
 
 	// 多目标优化：判断是否使用并发扫描（重构：简化判断逻辑）
@@ -1183,12 +1183,12 @@ func (sc *ScanController) runFingerprintModule(targets []string) ([]interfaces.H
 	if sc.fingerprintEngine != nil {
 		summary := sc.fingerprintEngine.GetLoadedSummaryString()
 		if summary != "" {
-			logger.Infof("%s", formatter.FormatBold(fmt.Sprintf("Start FingerPrint, Loaded FingerPrint Rules: %s", summary)))
+			logger.Infof("Start FingerPrint, Loaded FingerPrint Rules: %s", summary)
 		} else {
-			logger.Infof("%s", formatter.FormatBold("Start FingerPrint"))
+			logger.Infof("Start FingerPrint")
 		}
 	} else {
-		logger.Infof("%s", formatter.FormatBold("Start FingerPrint"))
+		logger.Infof("Start FingerPrint")
 	}
 	logger.Debugf("开始指纹识别，数量: %d", len(targets))
 
@@ -1519,7 +1519,10 @@ func (sc *ScanController) generateCustomReport(filterResult *interfaces.FilterRe
 		var pr []report.SDKPortResult
 		if strings.TrimSpace(sc.args.Ports) != "" {
 			// 计算有效速率与端口表达式（用于指示器输出）
-			effectiveRate := masscanrunner.ComputeEffectiveRate(sc.args.Rate)
+			effectiveRate := sc.args.Rate
+			if effectiveRate <= 0 {
+				effectiveRate = gogoscanner.DefaultRate
+			}
 
 			// 执行端口扫描（一次），复用结果：控制台打印 + 合并JSON
 			reused := len(sc.lastPortResults) > 0
@@ -1585,12 +1588,25 @@ func (sc *ScanController) generateCustomReport(filterResult *interfaces.FilterRe
 			}
 			var targets []string
 			if strings.TrimSpace(sc.args.TargetFile) == "" {
-				if ips, err := masscanrunner.ResolveTargetsToIPs(sc.args.Targets); err == nil {
+				if ips, err := portscanpkg.ResolveTargetsToIPs(sc.args.Targets); err == nil {
 					targets = ips
 				}
 			}
-			opts := portscanpkg.Options{Ports: portsExpr, Targets: targets, TargetFile: sc.args.TargetFile}
-			if results, err := masscanrunner.Run(opts); err == nil {
+			var scannerOpts []gogoscanner.Option
+			effectiveRate := sc.args.Rate
+			if effectiveRate <= 0 {
+				effectiveRate = gogoscanner.DefaultRate
+			}
+			scannerOpts = append(scannerOpts, gogoscanner.WithRate(effectiveRate))
+			if sc.args.Timeout > 0 {
+				scannerOpts = append(scannerOpts, gogoscanner.WithTimeout(time.Duration(sc.args.Timeout)*time.Second))
+			}
+			if sc.args.Threads > 0 {
+				scannerOpts = append(scannerOpts, gogoscanner.WithThreads(sc.args.Threads))
+			}
+
+			scanner := gogoscanner.NewScanner(scannerOpts...)
+			if results, err := scanner.Scan(context.Background(), targets, portsExpr); err == nil {
 				return report.GenerateExcelReportWithPorts(filterResult, reportType, results, outputPath)
 			} else {
 				logger.Errorf("端口扫描失败，Excel合并不包含端口: %v", err)

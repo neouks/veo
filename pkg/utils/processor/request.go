@@ -844,11 +844,8 @@ func (rp *RequestProcessor) extractTitleSafely(url, body string) string {
 
 // getContentLength 获取内容长度
 func (rp *RequestProcessor) getContentLength(resp *fasthttp.Response, body string) int64 {
-	contentLength := int64(len(body))
-	if resp.Header.ContentLength() >= 0 {
-		contentLength = int64(resp.Header.ContentLength())
-	}
-	return contentLength
+	// 优先返回实际body长度，因为可能经过了解压或截断，此时Content-Length头部可能不再准确
+	return int64(len(body))
 }
 
 // getContentType 获取内容类型

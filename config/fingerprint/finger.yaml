@@ -490,8 +490,13 @@ fortinet-sslvpn:
     - "contains(body, 'fgt_lang')"
 
 geoserver:
+  path:
+    - "/geoserver/web/"
+    - "/IMEE-GlobeServer/"
   dsl:
     - "contains(body, 'class=\"geoserver lebeg','GeoServerBasePage','_spring_security_remember_me','navigation-tab-content plain')"
+    - "contains(body, 'Geocoder','geosolutions')"
+    - "contains(header, './?0')"
 
 geotrust-cert:
   dsl:
@@ -730,9 +735,8 @@ jboss-eap:
 
 jeecgboot:
   dsl:
-    - "contains(body, 'jeecg-boot')"
-    - "contains(body, 'polyfill_')"
-    - "contains(body, 'casPrefixUrl')"
+    - "contains(body, 'jeecg-boot','polyfill_','casPrefixUrl','load_title')"
+    - "contains_all(body, 'absolute','9999999999999','#FFF','Open Sans','load_title')"
 
 jeecms:
   dsl:

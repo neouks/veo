@@ -525,14 +525,6 @@ func (rf *ResponseFilter) printValidPages(pages []interfaces.HTTPResponse) {
 	for idx := range pages {
 		page := &pages[idx]
 
-		baseInfo := fmt.Sprintf("%s %s %s %s %s",
-			formatURL(page.URL),
-			formatStatusCode(page.StatusCode),
-			formatTitle(page.Title),
-			formatContentLength(int(page.ContentLength)),
-			formatContentType(page.ContentType),
-		)
-
 		rf.mu.RLock()
 		hasEngine := rf.fingerprintEngine != nil
 		rf.mu.RUnlock()
@@ -542,12 +534,31 @@ func (rf *ResponseFilter) printValidPages(pages []interfaces.HTTPResponse) {
 			fingerprintStr string
 		)
 
+		// 先执行指纹识别，以便根据结果决定标题颜色
 		if hasEngine {
 			matches, fingerprintStr = rf.performFingerprintRecognition(page)
 			if len(matches) > 0 {
 				page.Fingerprints = matches
 			}
 		}
+
+		// 根据是否匹配到指纹选择不同的标题格式化函数
+		var titleFormatted string
+		if len(matches) > 0 {
+			// 匹配到指纹：浅绿色，不加粗
+			titleFormatted = formatter.FormatFingerprintTitle(page.Title)
+		} else {
+			// 未匹配到指纹：默认格式
+			titleFormatted = formatTitle(page.Title)
+		}
+
+		baseInfo := fmt.Sprintf("%s %s %s %s %s",
+			formatURL(page.URL),
+			formatStatusCode(page.StatusCode),
+			titleFormatted,
+			formatContentLength(int(page.ContentLength)),
+			formatContentType(page.ContentType),
+		)
 
 		var messageBuilder strings.Builder
 		messageBuilder.WriteString(baseInfo)
