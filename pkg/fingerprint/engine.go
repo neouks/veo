@@ -1,15 +1,16 @@
 package fingerprint
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,12 +42,13 @@ func NewEngine(config *EngineConfig) *Engine {
 	}
 
 	engine := &Engine{
-		config:      config,
-		rules:       make(map[string]*FingerprintRule),
-		matches:     make([]*FingerprintMatch, 0),
-		dslParser:   NewDSLParser(),
-		outputCache: make(map[string]bool),
-		iconCache:   make(map[string]string), // 初始化图标缓存
+		config:         config,
+		rules:          make(map[string]*FingerprintRule),
+		matches:        make([]*FingerprintMatch, 0),
+		dslParser:      NewDSLParser(),
+		outputCache:    make(map[string]bool),
+		iconCache:      make(map[string]string), // 初始化图标缓存
+		iconMatchCache: make(map[string]bool),
 		stats: &Statistics{
 			StartTime: time.Now(),
 		},
@@ -59,6 +61,34 @@ func NewEngine(config *EngineConfig) *Engine {
 	return engine
 }
 
+func (e *Engine) getIconMatchCache(iconURL, expectedHash string) (bool, bool) {
+	if e == nil {
+		return false, false
+	}
+	cacheKey := e.buildIconMatchCacheKey(iconURL, expectedHash)
+
+	e.iconMatchMutex.RLock()
+	result, exists := e.iconMatchCache[cacheKey]
+	e.iconMatchMutex.RUnlock()
+
+	return result, exists
+}
+
+func (e *Engine) setIconMatchCache(iconURL, expectedHash string, match bool) {
+	if e == nil {
+		return
+	}
+
+	cacheKey := e.buildIconMatchCacheKey(iconURL, expectedHash)
+	e.iconMatchMutex.Lock()
+	e.iconMatchCache[cacheKey] = match
+	e.iconMatchMutex.Unlock()
+}
+
+func (e *Engine) buildIconMatchCacheKey(iconURL, expectedHash string) string {
+	return iconURL + "||" + expectedHash
+}
+
 // SetStaticContentTypes 设置自定义静态Content-Type列表
 func (e *Engine) SetStaticContentTypes(contentTypes []string) {
 	e.mu.Lock()
@@ -69,6 +99,39 @@ func (e *Engine) SetStaticContentTypes(contentTypes []string) {
 	} else {
 		e.staticContentTypes = cloneStringSlice(contentTypes)
 	}
+}
+
+func (e *Engine) buildFingerprintDisplays(matches []*FingerprintMatch) []string {
+	displays := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if match == nil {
+			continue
+		}
+		display := e.formatFingerprintDisplay(match.RuleName, match.DSLMatched)
+		if display == "" {
+			continue
+		}
+		displays = append(displays, display)
+	}
+	return displays
+}
+
+func (e *Engine) logProbeSummary(response *HTTPResponse, matches []*FingerprintMatch) {
+	summary := strings.Join([]string{
+		formatter.FormatStatusCode(response.StatusCode),
+		formatter.FormatTitle(response.Title),
+		formatter.FormatContentLength(int(response.ContentLength)),
+		formatter.FormatContentType(response.ContentType),
+	}, " ")
+
+	if len(matches) > 0 {
+		displays := e.buildFingerprintDisplays(matches)
+		if len(displays) > 0 {
+			summary = summary + " " + strings.Join(displays, " ")
+		}
+	}
+
+	logger.Info(summary)
 }
 
 // SetStaticFileExtensions 设置自定义静态文件扩展名列表
@@ -94,6 +157,13 @@ func (e *Engine) EnableSnippet(enabled bool) {
 func (e *Engine) EnableRuleLogging(enabled bool) {
 	e.mu.Lock()
 	e.showRules = enabled
+	e.mu.Unlock()
+}
+
+// EnableConsoleSnippet 控制是否在控制台输出指纹匹配片段
+func (e *Engine) EnableConsoleSnippet(enabled bool) {
+	e.mu.Lock()
+	e.consoleSnippetEnabled = enabled
 	e.mu.Unlock()
 }
 
@@ -288,7 +358,7 @@ func (e *Engine) AnalyzeResponseWithClient(response *HTTPResponse, httpClient in
 		e.mu.Unlock()
 
 		// 使用统一的输出方法（消除重复代码）
-		e.outputFingerprintMatches(matches, response, "")
+		e.outputFingerprintMatches(matches, response)
 	} else {
 		// 没有匹配到指纹时，输出基本信息（标题+状态码）
 		e.outputNoMatchInfo(response)
@@ -300,7 +370,7 @@ func (e *Engine) AnalyzeResponseWithClient(response *HTTPResponse, httpClient in
 			if converted != nil {
 				rMatches := e.AnalyzeResponseWithClientSilent(converted, httpClient)
 				if len(rMatches) > 0 {
-					e.outputFingerprintMatches(rMatches, converted, "")
+					e.outputFingerprintMatches(rMatches, converted)
 					matches = append(matches, rMatches...)
 				}
 			}
@@ -500,28 +570,41 @@ func (e *Engine) createDSLContext(response *HTTPResponse) *DSLContext {
 
 // createDSLContextWithClient 创建DSL解析上下文（增强版，支持主动探测）
 func (e *Engine) createDSLContextWithClient(response *HTTPResponse, httpClient interface{}, baseURL string) *DSLContext {
-	// 构建http.Header
-	headers := make(http.Header)
-	for name, values := range response.ResponseHeaders {
-		headers[name] = values
+	headers := make(map[string][]string)
+	if response != nil && len(response.ResponseHeaders) > 0 {
+		headers = make(map[string][]string, len(response.ResponseHeaders))
+		for name, values := range response.ResponseHeaders {
+			if len(values) == 0 {
+				continue
+			}
+			dup := make([]string, len(values))
+			copy(dup, values)
+			headers[name] = dup
+		}
 	}
 
-	// 如果没有提供baseURL，尝试从response.URL中提取
-	if baseURL == "" && response.URL != "" {
+	if baseURL == "" && response != nil && response.URL != "" {
 		if parsedURL, err := url.Parse(response.URL); err == nil {
 			baseURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
 		}
 	}
 
+	var body, urlStr, method string
+	if response != nil {
+		body = response.Body
+		urlStr = response.URL
+		method = response.Method
+	}
+
 	return &DSLContext{
 		Response:   response,
 		Headers:    headers,
-		Body:       response.Body,
-		URL:        response.URL,
-		Method:     response.Method,
+		Body:       body,
+		URL:        urlStr,
+		Method:     method,
 		HTTPClient: httpClient,
 		BaseURL:    baseURL,
-		Engine:     e, // 传递Engine实例以访问图标缓存
+		Engine:     e,
 	}
 }
 
@@ -827,13 +910,19 @@ func (e *Engine) outputNoMatchInfo(response *HTTPResponse) {
 			nil,
 			false,
 		)
+
+		// 如果 URL 过长（超过 60 字符），在下一行输出完整 URL 方便复制
+		if len(response.URL) > 60 {
+			line += "\n  └─ " + response.URL
+		}
+
 		logger.Info(line)
 	}
 }
 
 // outputFingerprintMatches 统一的指纹匹配结果输出方法
 // 消除被动识别和主动探测中的重复代码，提供统一的日志输出和去重逻辑
-func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response *HTTPResponse, tag string) {
+func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response *HTTPResponse, tags ...string) {
 	if !e.config.LogMatches || len(matches) == 0 {
 		return
 	}
@@ -852,20 +941,7 @@ func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response 
 
 	// 使用优化的检查-标记方法
 	if e.checkAndMarkFingerprint(cacheKey) {
-		var fingerprintDisplays []string
-		for _, match := range matches {
-			if match == nil {
-				continue
-			}
-			display := e.formatFingerprintDisplay(match.RuleName, match.DSLMatched)
-			if display == "" {
-				continue
-			}
-			fingerprintDisplays = append(fingerprintDisplays, display)
-		}
-		if tag != "" {
-			// fingerprintDisplays = append(fingerprintDisplays, formatter.FormatFingerprintTag(tag))
-		}
+		fingerprintDisplays := e.buildFingerprintDisplays(matches)
 
 		line := formatter.FormatLogLine(
 			response.URL,
@@ -875,9 +951,15 @@ func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response 
 			response.ContentType,
 			fingerprintDisplays,
 			true,
+			tags...,
 		)
 
-		if e.showSnippet {
+		// 如果 URL 过长（超过 60 字符），在下一行输出完整 URL 方便复制
+		if len(response.URL) > 60 {
+			line += "\n  └─ " + response.URL
+		}
+
+		if e.consoleSnippetEnabled {
 			var snippetLines []string
 			for _, match := range matches {
 				if match == nil {
@@ -907,32 +989,33 @@ func (e *Engine) outputFingerprintMatches(matches []*FingerprintMatch, response 
 		logger.Info(line)
 	} else {
 		// 调试日志：跳过重复输出
-		tagSuffix := ""
-		if tag != "" {
-			tagSuffix = " [" + tag + "]"
-		}
-		logger.Debugf("跳过重复输出: %s (缓存键: %s)%s", response.URL, cacheKey, tagSuffix)
+		logger.Debugf("跳过重复输出: %s (缓存键: %s)", response.URL, cacheKey)
 	}
 }
 
 // 主动探测相关方法
 
-// TriggerActiveProbing 触发主动探测（异步）
-// 参数: baseURL - 基础URL（如 https://example.com）
-//
-//	httpClient - HTTP客户端接口
+// TriggerActiveProbing 触发主动探测（异步，用于被动模式）
 func (e *Engine) TriggerActiveProbing(baseURL string, httpClient interface{}) {
 	if httpClient == nil {
-		logger.Debug("HTTP客户端未设置，跳过主动探测")
 		return
 	}
-
-	// 异步执行主动探测，避免阻塞主流程
-	go e.performActiveProbing(baseURL, httpClient)
+	go func() {
+		// 使用默认超时
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		// 执行主动Path探测
+		_, _ = e.ExecuteActiveProbing(ctx, baseURL, httpClient)
+		
+		// 执行404探测
+		ctx404, cancel404 := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel404()
+		_, _ = e.Execute404Probing(ctx404, baseURL, httpClient)
+	}()
 }
 
-// performActiveProbing 执行主动探测
-func (e *Engine) performActiveProbing(baseURL string, httpClient interface{}) {
+// ExecuteActiveProbing 执行主动指纹探测（同步返回结果）
+func (e *Engine) ExecuteActiveProbing(ctx context.Context, baseURL string, httpClient interface{}) ([]*ProbeResult, error) {
 	logger.Debugf("开始主动探测: %s", baseURL)
 
 	// 获取所有包含path字段的规则
@@ -957,178 +1040,143 @@ func (e *Engine) performActiveProbing(baseURL string, httpClient interface{}) {
 
 	if totalPaths == 0 && len(headerOnlyRules) == 0 {
 		logger.Debug("没有需要主动探测的规则，跳过主动探测")
-		return
+		return nil, nil
 	}
 
-	if totalPaths > 0 {
-		logger.Debugf("找到 %d 个包含path字段的规则，共 %d 条路径", len(pathRules), totalPaths)
-	}
-	if len(headerOnlyRules) > 0 {
-		logger.Debugf("找到 %d 个包含header字段的规则需要主动探测", len(headerOnlyRules))
-	}
-
-	// 解析baseURL获取协议和主机
+	// 解析baseURL
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		logger.Debugf("URL解析失败: %s, 错误: %v", baseURL, err)
-		return
+		return nil, fmt.Errorf("URL解析失败: %v", err)
 	}
-
 	scheme := parsedURL.Scheme
 	host := parsedURL.Host
 
-	// 遍历所有path规则进行探测
+	var results []*ProbeResult
+	var resultsMu sync.Mutex
+
+	// 任务列表
+	type task struct {
+		rule *FingerprintRule
+		path string
+	}
+	var tasks []task
+
 	for _, rule := range pathRules {
-		e.performRuleProbing(rule, scheme, host, baseURL, httpClient)
-	}
-
-	// 处理仅包含header的规则（默认探测根路径）
-	for _, rule := range headerOnlyRules {
-		defaultURL := buildProbeURLFromParts(scheme, host, "/")
-		e.performRuleRequest(rule, defaultURL, baseURL, httpClient, true)
-	}
-
-	// [新增] 404页面指纹识别（保持独立调用）
-	e.perform404PageProbing(baseURL, httpClient)
-
-	logger.Debugf("主动探测完成: %s (共探测 %d 条路径)", baseURL, totalPaths)
-}
-
-func (e *Engine) performRuleProbing(rule *FingerprintRule, scheme, host, baseURL string, httpClient interface{}) {
-	if rule == nil {
-		return
-	}
-	headers := rule.GetHeaderMap()
-	for _, rawPath := range rule.Paths {
-		probePath := strings.TrimSpace(rawPath)
-		if probePath == "" {
-			continue
+		for _, p := range rule.Paths {
+			tasks = append(tasks, task{rule: rule, path: strings.TrimSpace(p)})
 		}
-		probeURL := buildProbeURLFromParts(scheme, host, probePath)
-		e.performRuleRequest(rule, probeURL, baseURL, httpClient, false, headers)
 	}
+	// Header规则作为根路径任务添加（简化处理）
+	for _, rule := range headerOnlyRules {
+		tasks = append(tasks, task{rule: rule, path: "/"})
+	}
+
+	// 并发控制
+	concurrency := e.config.MaxConcurrency
+	if concurrency <= 0 {
+		concurrency = 20
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for _, t := range tasks {
+		wg.Add(1)
+		go func(tk task) {
+			defer wg.Done()
+
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+
+			probeURL := buildProbeURLFromParts(scheme, host, tk.path)
+			
+			// 构造Headers
+			var headers map[string]string
+			if tk.rule.HasHeaders() {
+				headers = tk.rule.GetHeaderMap()
+			}
+
+			// 发起请求
+			body, statusCode, err := makeRequestWithOptionalHeaders(httpClient, probeURL, headers)
+			if err != nil {
+				return
+			}
+
+			// 构造响应对象
+			resp := &HTTPResponse{
+				URL:             probeURL,
+				Method:          "GET",
+				StatusCode:      statusCode,
+				ResponseHeaders: make(map[string][]string),
+				Body:            body,
+				ContentType:     "text/html",
+				ContentLength:   int64(len(body)),
+				Title:           shared.ExtractTitle(body),
+			}
+
+			// 匹配规则
+			dslCtx := e.createDSLContextWithClient(resp, httpClient, baseURL)
+			if match := e.matchRule(tk.rule, dslCtx); match != nil {
+				// 输出日志
+				e.outputFingerprintMatches([]*FingerprintMatch{match}, resp, "主动探测")
+				
+				resultsMu.Lock()
+				results = append(results, &ProbeResult{
+					Response: resp,
+					Matches:  []*FingerprintMatch{match},
+				})
+				resultsMu.Unlock()
+			}
+		}(t)
+	}
+
+	wg.Wait()
+	return results, nil
 }
 
-func (e *Engine) performRuleRequest(rule *FingerprintRule, probeURL, baseURL string, httpClient interface{}, logDefault bool, headerArgs ...map[string]string) {
-	if rule == nil {
-		return
-	}
-	var headers map[string]string
-	if len(headerArgs) > 0 && headerArgs[0] != nil {
-		headers = headerArgs[0]
-	} else if rule.HasHeaders() {
-		headers = rule.GetHeaderMap()
-	}
+// Execute404Probing 执行404页面探测（同步返回结果）
+func (e *Engine) Execute404Probing(ctx context.Context, baseURL string, httpClient interface{}) (*ProbeResult, error) {
+	logger.Debugf("开始404页面指纹识别: %s", baseURL)
 
-	if logDefault {
-		logger.Debugf("主动探测URL: %s (Header规则: %s)", probeURL, rule.Name)
-	} else {
-		logger.Debugf("主动探测URL: %s (规则: %s)", probeURL, rule.Name)
-	}
-
-	body, statusCode, err := makeRequestWithOptionalHeaders(httpClient, probeURL, headers)
+	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		logger.Debugf("主动探测请求失败: %s, 错误: %v", probeURL, err)
-		return
+		return nil, fmt.Errorf("URL解析失败: %v", err)
+	}
+	scheme := parsedURL.Scheme
+	host := parsedURL.Host
+	notFoundURL := fmt.Sprintf("%s://%s/404test", scheme, host)
+
+	// 发起请求
+	body, statusCode, err := makeRequestWithOptionalHeaders(httpClient, notFoundURL, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	response := &HTTPResponse{
-		URL:             probeURL,
+	resp := &HTTPResponse{
+		URL:             notFoundURL,
 		Method:          "GET",
 		StatusCode:      statusCode,
 		ResponseHeaders: make(map[string][]string),
 		Body:            body,
 		ContentType:     "text/html",
 		ContentLength:   int64(len(body)),
-		Server:          "",
 		Title:           shared.ExtractTitle(body),
 	}
 
-	ctx := e.createDSLContextWithClient(response, httpClient, baseURL)
-	if match := e.matchRule(rule, ctx); match != nil {
-		atomic.AddInt64(&e.stats.MatchedRequests, 1)
-		e.mu.Lock()
-		e.stats.LastMatchTime = time.Now()
-		e.matches = append(e.matches, match)
-		e.mu.Unlock()
-
-		e.outputFingerprintMatches([]*FingerprintMatch{match}, response, "主动探测")
-		logger.Debugf("主动探测实时输出: %s (规则: %s)", probeURL, rule.Name)
-	}
-}
-
-// perform404PageProbing 执行404页面指纹识别
-// [修改] 移除urlResults参数，简化为独立的实时输出
-func (e *Engine) perform404PageProbing(baseURL string, httpClient interface{}) {
-	logger.Debugf("开始404页面指纹识别: %s", baseURL)
-
-	// 解析baseURL获取协议和主机
-	parsedURL, err := url.Parse(baseURL)
-	if err != nil {
-		logger.Debugf("URL解析失败: %s, 错误: %v", baseURL, err)
-		return
+	// 全量匹配
+	matches := e.match404PageFingerprints(resp, httpClient, baseURL)
+	if len(matches) > 0 {
+		e.outputFingerprintMatches(matches, resp, "404探测")
+		return &ProbeResult{
+			Response: resp,
+			Matches:  matches,
+		}, nil
 	}
 
-	scheme := parsedURL.Scheme
-	host := parsedURL.Host
-
-	// 构造404测试URL
-	notFoundURL := fmt.Sprintf("%s://%s/404test", scheme, host)
-	logger.Debugf("404页面探测URL: %s", notFoundURL)
-
-	// 发起HTTP请求
-	if client, ok := httpClient.(interface {
-		MakeRequest(string) (string, int, error)
-	}); ok {
-		body, statusCode, err := client.MakeRequest(notFoundURL)
-		if err != nil {
-			logger.Debugf("404页面探测请求失败: %s, 错误: %v", notFoundURL, err)
-			return
-		}
-
-		// 构造模拟的HTTPResponse用于DSL匹配
-		response := &HTTPResponse{
-			URL:             notFoundURL,
-			Method:          "GET",
-			StatusCode:      statusCode,
-			ResponseHeaders: make(map[string][]string), // 简化版，暂不解析响应头
-			Body:            body,
-			ContentType:     "text/html", // 简化假设
-			ContentLength:   int64(len(body)),
-			Server:          "",
-			Title:           shared.ExtractTitle(body),
-		}
-
-		logger.Debugf("404页面响应: 状态码=%d, 标题='%s', 内容长度=%d",
-			statusCode, response.Title, len(body))
-
-		// 对404页面进行全量指纹规则匹配
-		matches := e.match404PageFingerprints(response, httpClient, baseURL)
-
-		if len(matches) > 0 {
-			// 更新统计
-			for range matches {
-				atomic.AddInt64(&e.stats.MatchedRequests, 1)
-				e.mu.Lock()
-				e.stats.LastMatchTime = time.Now()
-				e.mu.Unlock()
-			}
-
-			// 保存匹配结果
-			e.mu.Lock()
-			e.matches = append(e.matches, matches...)
-			e.mu.Unlock()
-
-			// [关键] 实时输出404页面的匹配结果
-			e.outputFingerprintMatches(matches, response, "404页面")
-
-			logger.Debugf("404页面实时输出: 匹配到 %d 个指纹", len(matches))
-		} else {
-			logger.Debugf("404页面未匹配到任何指纹")
-		}
-	} else {
-		logger.Debugf("HTTP客户端不支持MakeRequest方法，跳过404页面探测")
-	}
+	return nil, nil
 }
 
 // match404PageFingerprints 对404页面进行全量指纹规则匹配

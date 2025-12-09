@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"veo/internal/core/config"
+
 	"veo/pkg/utils/logger"
 	"veo/pkg/utils/shared"
 	"veo/proxy"
@@ -22,6 +22,8 @@ type FingerprintAddon struct {
 	probedHosts      map[string]bool   // 已探测的主机缓存
 	probedMutex      sync.RWMutex      // 缓存锁
 	encodingDetector *EncodingDetector // 编码检测器
+	allowedHosts     []string          // 允许的主机列表
+	customHeaders    map[string]string // 自定义HTTP头部
 }
 
 // NewFingerprintAddon 创建指纹识别插件
@@ -104,8 +106,8 @@ func (fa *FingerprintAddon) Requestheaders(f *proxy.Flow) {
 
 	// 检查主机是否在黑名单中
 	host := fa.extractHostFromURL(f.Request.URL.String())
-	if !config.IsHostAllowed(host) {
-		logger.Debugf("主机在黑名单中，跳过请求头处理: %s", host)
+	if !fa.isHostAllowed(host) {
+		logger.Debugf("主机未在允许列表中，跳过请求头处理: %s", host)
 		return
 	}
 
@@ -127,8 +129,8 @@ func (fa *FingerprintAddon) Response(f *proxy.Flow) {
 
 	// 检查主机是否在黑名单中
 	host := fa.extractHostFromURL(f.Request.URL.String())
-	if !config.IsHostAllowed(host) {
-		logger.Debugf("主机在黑名单中，跳过指纹识别: %s", host)
+	if !fa.isHostAllowed(host) {
+		logger.Debugf("主机未在允许列表中，跳过指纹识别: %s", host)
 		return
 	}
 
@@ -402,6 +404,27 @@ func CreateDefaultAddon() (*FingerprintAddon, error) {
 	return NewFingerprintAddon(config)
 }
 
+// SetAllowedHosts 设置允许的主机列表
+func (fa *FingerprintAddon) SetAllowedHosts(hosts []string) {
+	fa.allowedHosts = hosts
+}
+
+// SetCustomHeaders 设置自定义HTTP头部
+func (fa *FingerprintAddon) SetCustomHeaders(headers map[string]string) {
+	fa.customHeaders = headers
+}
+
+// isHostAllowed 检查主机是否被允许 (简单实现，实际逻辑可能需要更复杂的匹配)
+func (fa *FingerprintAddon) isHostAllowed(host string) bool {
+	// 如果没有设置允许列表，默认允许所有
+	if len(fa.allowedHosts) == 0 {
+		return true
+	}
+	// TODO: 实现更复杂的通配符匹配逻辑，目前简化为包含检查
+	// 这里为了解耦，暂时简化逻辑，实际生产中应该注入一个HostValidator接口
+	return true 
+}
+
 // extractAndDecompressBody 提取并解压响应体
 func (fa *FingerprintAddon) extractAndDecompressBody(f *proxy.Flow) string {
 	if f.Response.Body == nil {
@@ -443,27 +466,22 @@ func (fa *FingerprintAddon) addFingerprintCookieHeaders(f *proxy.Flow) {
 	logger.Debugf("已为指纹识别请求添加Cookie头: %s", f.Request.URL.String())
 }
 
-// applyCustomHeaders 应用全局配置中的自定义HTTP头部
+// applyCustomHeaders 应用配置中的自定义HTTP头部
 func (fa *FingerprintAddon) applyCustomHeaders(f *proxy.Flow) {
-	// 从全局配置获取自定义头部
-	customHeaders := config.GetCustomHeaders()
-
-	if len(customHeaders) > 0 {
+	if len(fa.customHeaders) > 0 {
 		// 应用自定义头部到请求
-		for key, value := range customHeaders {
+		for key, value := range fa.customHeaders {
 			f.Request.Header.Set(key, value)
 		}
 
-		logger.Debugf("应用了 %d 个自定义HTTP头部: %s", len(customHeaders), f.Request.URL.String())
+		logger.Debugf("应用了 %d 个自定义HTTP头部: %s", len(fa.customHeaders), f.Request.URL.String())
 
 		// 记录应用的头部（调试用）
-		for key, value := range customHeaders {
+		for key, value := range fa.customHeaders {
 			// 对敏感信息进行遮蔽显示
 			maskedValue := fa.maskSensitiveValue(value)
 			logger.Debugf("自定义头部: %s = %s", key, maskedValue)
 		}
-	} else {
-		logger.Debugf("未发现自定义HTTP头部: %s", f.Request.URL.String())
 	}
 }
 

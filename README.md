@@ -10,7 +10,17 @@
 ---
 [![asciicast](https://asciinema.org/a/nNomQmVMS7vfU6TKbPtCI7Nd0.svg)](https://asciinema.org/a/nNomQmVMS7vfU6TKbPtCI7Nd0)
 
-## 更新日志 
+## 更新日志
+
+- 2025/12/09
+  ```
+  1、优化被动扫描报告输出方式和逻辑。
+  2、新增目录递归扫描，协助发现更多隐藏页面。
+  3、模块统一使用fasthttp库，提升扫描速度，节省网络开销。
+  4、修改指纹规则加载逻辑，采用云端加载方式，通过--update-rules更新指纹。
+  5、新增漏洞扫描专项字典，协助快速发现历史0/1/N漏洞。
+  6、新增参数--no-filter，用来关闭相似页面过滤功能。
+  ```
 
 - 2025/12/06
   ```
@@ -123,17 +133,20 @@
 # 批量目录扫描 + 指纹识别
 ./veo -l target.txt --stats
 
-# 目录扫描 + 指纹识别 + 端口扫描（默认配置，使用内置字典）
-./veo -u http://target.com -p 1-65535
-
-# 目录扫描 + 指纹识别 + 端口扫描，输出json结果
-./veo -u http://target.com -p 1-65535 --json
-
 # 使用自定义字典、输出 JSON 报告
-./veo -u http://target.com -w dict/custom.txt --output report.json
+./veo -u http://target.com -w dict/custom.txt -o report.json
 
-# 使用自定义字典、输出 HTML 报告
-./veo -u http://target.com -w dict/custom.txt --output report.html
+# 使用自定义字典、输出 Excel 报告（包含两个工作表：有效结果和全部结果）
+./veo -u http://target.com -w dict/custom.txt -o report.xlsx
+
+# 递归目录扫描（深度为2层）
+./veo -u http://target.com --depth 2
+
+# 禁用哈希过滤，显示所有扫描结果
+./veo -u http://target.com --no-filter
+
+# 自定义状态码过滤
+./veo -u http://target.com -s 200,301,302,403
 
 # 仅指纹识别
 ./veo -m finger -u http://target.com
@@ -141,13 +154,17 @@
 # 仅目录扫描
 ./veo -m dirscan -u http://target.com
 
-# 仅端口扫描
-./veo -m port -u 1.1.1.1 -p 1-65535
-./veo -m port -u 1.1.1.1/24 -p 1-65535
-./veo -m port -u 1.1.1.1-1.1.1.254 -p 1-65535
+# 显示指纹匹配规则和匹配片段
+./veo -u http://target.com -vv
 
-# 仅端口扫描+服务识别
-./veo -m port -u 1.1.1.1 -p 1-65535 -sV
+# 使用自定义 HTTP 头部
+./veo -u http://target.com --header "Authorization: Bearer token123" --header "X-API-Key: key456"
+
+# 控制台输出 JSON 格式（配合管道使用）
+./veo -u http://target.com --json
+
+# 更新指纹识别规则库
+./veo --update-rules
 
 # 被动扫描（默认监听端口9080）
 ./veo -u http://target.com --listen -lp 8090
@@ -162,7 +179,7 @@
 |------|--------|------|------|
 | `-u` | 必填或 `-l` | 目标列表，逗号分隔。支持完整 URL、域名、`host:port`、CIDR、IP 范围。 | `-u http://a.com,https://b.com` |
 | `-l` | — | 目标文件路径，每行一个目标；支持注释 `#` 和空行。 | `-l targets.txt` |
-| `-m` | `finger,dirscan` | 启用的模块，逗号分隔：`finger` 指纹识别，`dirscan` 目录扫描，`port` 端口扫描。 | `-m port` |
+| `-m` | `finger,dirscan` | 启用的模块，逗号分隔：`finger` 指纹识别，`dirscan` 目录扫描。 | `-m finger` |
 | `--listen` | `false` | 启用被动代理模式（监听 HTTP 流量），默认主动扫描。 | `--listen` |
 | `-lp` | `9080` | 被动代理监听端口，仅在 `--listen` 模式下使用。 | `-lp 8080` |
 
@@ -173,51 +190,48 @@
 | `--debug` | `false` | 启用调试日志，输出 `[DBG]` 级别信息。 | `--debug` |
 | `--stats` | `false` | 显示实时扫描统计（适用于长时间任务）。 | `--stats` |
 | `-v` | `false` | 显示指纹匹配规则内容（不含片段）。 | `-v` |
-| `-na` | `false` | 跳过存活检测，直接对目标发起扫描。 | `-na` |
 | `-vv` | `false` | 显示指纹匹配规则及匹配片段详情。 | `-vv` |
-| `-nc` | `false` | 禁用彩色输出，适用于不支持 ANSI 的终端。 | `-nc` |
+| `-nc`, `--no-color` | `false` | 禁用彩色输出，适用于不支持 ANSI 的终端。 | `--no-color` |
 | `--json` | `false` | 控制台结果以 JSON 输出。 | `--json` |
+| `-nc` | `false` | 启用存活性检测 (默认关闭)。 | `-nc` |
+| `-ua` | `true` | 是否启用随机User-Agent池，可通过 `-ua=false` 关闭。 | `-ua=false` |
 
 ### 性能调优
 
 | 参数 | 默认值 | 说明 | 示例 |
 |------|--------|------|------|
 | `-t`, `--threads` | `200` | 全局并发线程数（请求处理、目录扫描等）。 | `-t 100` |
-| `--retry` | `3` | 失败重试次数。 | `--retry 5` |
-| `--timeout` | `5` 秒 | 全局请求超时时间。 | `--timeout 10` |
+| `--retry` | `1` | 失败重试次数。 | `--retry 3` |
+| `--timeout` | `3` 秒 | 全局请求超时时间。 | `--timeout 10` |
 
 ## 目录扫描
 
 | 参数 | 默认值 | 说明 | 示例 |
 |------|--------|------|------|
-| `-w` | 配置文件字典 | 指定自定义目录扫描字典文件（多文件 可逗号分隔）。 | `-w dict/common.txt,dict/admin.txt` |
-
-## 端口扫描
-
-| 参数 | 默认值 | 说明 | 示例 |
-|------|--------|------|------|
-| `-p` | 必填（启用 port 模块时） | 端口表达式，支持单个、范围、逗号组合。 | `-p 80,443,8000-8100` |
-| `--rate` | `2048` | 端口探测速率| `--rate 5012` |
-| `-sV` | `false` | 对开放端口执行服务识别（基于内置指纹 + HTTP fallback）。 | `-sV` |
+| `-w` | `config/dict/common.txt` | 指定自定义目录扫描字典文件（多文件可逗号分隔）。 | `-w dict/common.txt,dict/admin.txt` |
+| `--depth` | `0` | 递归目录扫描深度，0 表示关闭递归。 | `--depth 2` |
 
 ## 输出控制
 
 | 参数 | 默认值 | 说明 | 示例 |
 |------|--------|------|------|
-| `-o`, `--output` | — | 结果输出到文件，支持 `.json`, `.xlsx`。 | `--output report.json` |
-| `--json` | `false` | 控制台输出 JSON（配合 `-o *.json` 会写入合并结果）。 | `--json` |
+| `-o`, `--output` | — | 结果输出到文件，支持 `.json`, `.xlsx`。Excel 报告包含两个工作表：过滤结果和全部结果。 | `-o report.xlsx` |
+| `--json` | `false` | 控制台输出 JSON，便于与其他工具集成。 | `--json` |
 
 ## HTTP 与过滤
 
 | 参数 | 默认值 | 说明 | 示例 |
 |------|--------|------|------|
-| `--header` | — | 自定义 HTTP 头，可多次指定。 | `--header "Authorization: Bearer xxx"` |
-| `-s` | 配置默认 | 保留的 HTTP 状态码列表，逗号分隔。 | `-s 200,301,302` |
-| `--filter` | `50` | 相似页面过滤阈值（字节）。`0` 表示禁用。 | `--filter 100` |
+| `--header` | — | 自定义 HTTP 头，可多次指定。格式：`"Header-Name: Header-Value"`。 | `--header "Authorization: Bearer xxx"` |
+| `-s` | `200,403,500,302,301,405` | 保留的 HTTP 状态码列表，逗号分隔。 | `-s 200,301,302` |
+| `--no-filter` | `false` | 完全禁用目录扫描哈希过滤，显示所有响应。 | `--no-filter` |
+| `--proxy` | — | 设置上游代理，支持 HTTP/SOCKS5 代理。 | `--proxy http://127.0.0.1:8080` |
 
-> **注意**  
->  端口扫描需要管理员权限（macOS/Linux 使用 `sudo`，Windows 用管理员命令提示符）。  
-当 `-m port` 单独使用时，必须指定 `-p`，建议配合 `-sV` 获取服务信息。默认速率 `2048`。 
+## 指纹库管理
+
+| 参数 | 默认值 | 说明 | 示例 |
+|------|--------|------|------|
+| `--update-rules` | `false` | 从云端更新指纹识别规则库。 | `--update-rules` |
 
 ---
 ## 配置文件说明

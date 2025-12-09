@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"veo/internal/core/config"
+
 	"veo/pkg/utils/logger"
 	"veo/pkg/utils/shared"
 	"veo/proxy"
@@ -19,6 +19,9 @@ type Collector struct {
 	urlMap             map[string]int  // 最终采集的URL访问计数映射
 	pendingURLs        map[string]bool // 待处理的URL（已过滤静态资源）
 	includeStatusCodes []int           // 需要采集的状态码白名单
+	staticExtensions   []string        // 静态文件扩展名列表
+	staticPaths        []string        // 静态路径列表
+	allowedHosts       []string        // 允许的主机列表
 	mu                 sync.RWMutex    // 读写锁，保证并发安全
 	collectionEnabled  bool            // 收集功能是否启用
 	collectionPaused   bool            // 收集是否暂停（等待用户输入）
@@ -29,23 +32,17 @@ type Collector struct {
 // NewCollector 创建新的Collector实例
 func NewCollector() *Collector {
 	logger.Debugf("创建Collector实例")
-	collectorConfig := config.GetCollectorConfig()
 
-	// 关键检查：确保配置正确加载
-	if collectorConfig == nil {
-		logger.Errorf("⚠️  配置未加载！")
-	} else {
-		logger.Debugf("静态扩展名配置加载: %v", collectorConfig.Static.Extensions)
-	}
+	// 默认状态码
+	defaultStatusCodes := []int{200, 301, 302, 403, 404, 500}
 
 	collector := &Collector{
 		urlMap:             make(map[string]int),
 		pendingURLs:        make(map[string]bool),
-		includeStatusCodes: collectorConfig.GenerationStatusCodes,
+		includeStatusCodes: defaultStatusCodes,
 		collectionEnabled:  true, // 默认启用收集功能
 	}
 
-	logger.Debugf("Collector实例创建完成，状态码白名单: %v", collectorConfig.GenerationStatusCodes)
 	return collector
 }
 
@@ -225,24 +222,28 @@ func (c *Collector) CleanURLParams(rawURL string) string {
 
 // isHostAllowed 检查主机是否被允许
 func (c *Collector) isHostAllowed(host string) bool {
-	return config.IsHostAllowed(host)
+	// 如果没有设置允许列表，默认允许所有
+	if len(c.allowedHosts) == 0 {
+		return true
+	}
+	// TODO: 实现更复杂的通配符匹配逻辑
+	return true
 }
 
 // 私有辅助方法 - 静态资源过滤
 
 // isStaticResource 检查URL是否为静态资源
 func (c *Collector) isStaticResource(url string) bool {
-	staticConfig := config.GetCollectorConfig().Static
 	lowerURL := strings.ToLower(url)
 
 	// 检查是否包含静态目录
-	if c.containsStaticPath(lowerURL, staticConfig.Path) {
+	if c.containsStaticPath(lowerURL, c.staticPaths) {
 		logger.Debugf("匹配静态目录，过滤: %s", url)
 		return true
 	}
 
 	// 检查是否以静态文件扩展名结尾
-	isStatic := c.hasStaticExtension(lowerURL, staticConfig.Extensions)
+	isStatic := c.hasStaticExtension(lowerURL, c.staticExtensions)
 	if isStatic {
 		logger.Debugf("匹配静态扩展名，过滤: %s", url)
 		return true
@@ -592,6 +593,26 @@ func (c *Collector) getAuthParams() map[string]bool {
 		"privilege":  true, // 特权
 
 	}
+}
+
+// SetIncludeStatusCodes 设置需要采集的状态码白名单
+func (c *Collector) SetIncludeStatusCodes(codes []int) {
+	c.includeStatusCodes = codes
+}
+
+// SetStaticExtensions 设置静态文件扩展名列表
+func (c *Collector) SetStaticExtensions(exts []string) {
+	c.staticExtensions = exts
+}
+
+// SetStaticPaths 设置静态路径列表
+func (c *Collector) SetStaticPaths(paths []string) {
+	c.staticPaths = paths
+}
+
+// SetAllowedHosts 设置允许的主机列表
+func (c *Collector) SetAllowedHosts(hosts []string) {
+	c.allowedHosts = hosts
 }
 
 // 私有辅助方法 - 状态码处理

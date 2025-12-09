@@ -16,7 +16,6 @@ type ScanResult struct {
 	ScanURLs      []string                   `json:"scan_urls"`      // 生成的扫描URL
 	Responses     []*interfaces.HTTPResponse `json:"responses"`      // HTTP响应
 	FilterResult  *interfaces.FilterResult   `json:"filter_result"`  // 过滤结果
-	ReportPath    string                     `json:"report_path"`    // 报告路径
 	StartTime     time.Time                  `json:"start_time"`     // 开始时间
 	EndTime       time.Time                  `json:"end_time"`       // 结束时间
 	Duration      time.Duration              `json:"duration"`       // 扫描耗时
@@ -28,7 +27,6 @@ type EngineConfig struct {
 	RequestTimeout   time.Duration `yaml:"request_timeout"`   // 请求超时时间
 	EnableCollection bool          `yaml:"enable_collection"` // 是否启用URL收集
 	EnableFiltering  bool          `yaml:"enable_filtering"`  // 是否启用响应过滤
-	EnableReporting  bool          `yaml:"enable_reporting"`  // 是否启用报告生成
 	ProxyURL         string        `yaml:"proxy_url"`         // 上游代理地址
 }
 
@@ -74,6 +72,5 @@ func getDefaultConfig() *EngineConfig {
 		RequestTimeout:   30 * time.Second,
 		EnableCollection: true,
 		EnableFiltering:  true,
-		EnableReporting:  true,
 	}
 }

@@ -25,3 +25,6 @@ package-lock.json
 package.json
 /frontend
 apiserver
+*.xlsx
+*.md
+main

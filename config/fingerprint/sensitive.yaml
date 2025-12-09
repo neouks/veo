@@ -258,10 +258,6 @@ email:
   dsl:
   - contains(body, '</A><br></pre><hr></body></html>')
 
-疑似struts框架:
-  dsl:
-    - contains(body, '.action')
-
 thinkphp框架报错:
   dsl:
     - contains_all(body, '控制器不存在','HTTP_ACCEPT_LANGUAGE')

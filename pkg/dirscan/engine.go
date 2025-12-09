@@ -2,16 +2,12 @@ package dirscan
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"time"
 
-	report "veo/pkg/reporter"
 	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
 	requests "veo/pkg/utils/processor"
-	sharedutils "veo/pkg/utils/shared"
 )
 
 // 引擎实现
@@ -82,10 +78,26 @@ func (e *Engine) ClearResults() {
 
 // PerformScan 执行扫描
 func (e *Engine) PerformScan(collectorInstance interfaces.URLCollectorInterface) (*ScanResult, error) {
+	return e.PerformScanWithOptions(collectorInstance, false)
+}
+
+// PerformScanWithOptions 执行扫描（支持选项）
+func (e *Engine) PerformScanWithOptions(collectorInstance interfaces.URLCollectorInterface, recursive bool) (*ScanResult, error) {
 	startTime := time.Now()
 
 	// 1. 生成扫描URL（内部会处理URL收集为空的情况）
-	scanURLs, err := e.generateScanURLs(collectorInstance)
+	// [修改] 传递 recursive 参数给 GenerateURLsFromCollector
+	// 注意：这里需要类型断言或修改 GenerateURLsFromCollector 的调用方式
+	// 因为我们刚刚修改了 generator.go 中的 GenerateURLsFromCollector 方法
+	// 但是我们需要通过 generator 实例调用
+	// generator := NewURLGenerator()
+	// scanURLs := generator.GenerateURLsFromCollector(collectorInstance, recursive)
+	
+	// 在 engine.go 中，我们之前是这样调用的：
+	// scanURLs, err := e.generateScanURLs(collectorInstance)
+	// 我们需要修改 e.generateScanURLs 方法来接受 recursive 参数
+
+	scanURLs, err := e.generateScanURLs(collectorInstance, recursive)
 	if err != nil {
 		return nil, fmt.Errorf("生成扫描URL失败: %v", err)
 	}
@@ -124,17 +136,7 @@ func (e *Engine) PerformScan(collectorInstance interfaces.URLCollectorInterface)
 	logger.Debugf("过滤完成 - 总响应: %d, 有效结果: %d",
 		len(responses), len(filterResult.ValidPages))
 
-	// 5. 生成报告
-	reportPath := ""
-	if e.config.EnableReporting {
-		target := e.extractTarget(responses)
-		reportPath, err = e.generateReport(filterResult, target)
-		if err != nil {
-			logger.Warnf("报告生成失败: %v", err)
-		}
-	}
-
-	// 6. 创建扫描结果
+	// 5. 创建扫描结果
 	endTime := time.Now()
 	result := &ScanResult{
 		Target:        e.extractTarget(responses),
@@ -142,7 +144,6 @@ func (e *Engine) PerformScan(collectorInstance interfaces.URLCollectorInterface)
 		ScanURLs:      scanURLs,
 		Responses:     responses,
 		FilterResult:  filterResult,
-		ReportPath:    reportPath,
 		StartTime:     startTime,
 		EndTime:       endTime,
 		Duration:      endTime.Sub(startTime),
@@ -161,14 +162,15 @@ func (e *Engine) PerformScan(collectorInstance interfaces.URLCollectorInterface)
 }
 
 // generateScanURLs 生成扫描URL
-func (e *Engine) generateScanURLs(collectorInstance interfaces.URLCollectorInterface) ([]string, error) {
+func (e *Engine) generateScanURLs(collectorInstance interfaces.URLCollectorInterface, recursive bool) ([]string, error) {
 	logger.Debug("开始生成扫描URL")
 
 	// 创建URL生成器
 	generator := NewURLGenerator()
 
 	// 生成扫描URL
-	scanURLs := generator.GenerateURLsFromCollector(collectorInstance)
+	// [修改] 传递 recursive 参数
+	scanURLs := generator.GenerateURLsFromCollector(collectorInstance, recursive)
 
 	logger.Debugf("生成扫描URL完成，共%d个", len(scanURLs))
 	return scanURLs, nil
@@ -266,32 +268,6 @@ func (e *Engine) applyFilter(responses []*interfaces.HTTPResponse) (*interfaces.
 	responseFilter.PrintFilterResult(filterResult)
 
 	return filterResult, nil
-}
-
-// generateReport 生成报告
-func (e *Engine) generateReport(filterResult *interfaces.FilterResult, target string) (string, error) {
-	logger.Debug("开始生成扫描报告")
-
-	reportDir := "./reports"
-	if err := os.MkdirAll(reportDir, 0o755); err != nil {
-		return "", fmt.Errorf("创建报告目录失败: %v", err)
-	}
-
-	timestamp := time.Now().Format("20060102_150405")
-	safeTarget := sharedutils.SanitizeFilename(target) // 使用shared包中的SanitizeFilename
-	if safeTarget == "" {
-		safeTarget = "scan"
-	}
-	fileName := fmt.Sprintf("dirscan_%s_%s.xlsx", safeTarget, timestamp)
-	outputPath := filepath.Join(reportDir, fileName)
-
-	reportPath, err := report.GenerateExcelReport(filterResult, report.ExcelReportDirscan, outputPath)
-	if err != nil {
-		return "", err
-	}
-
-	logger.Debugf("报告文件已生成: %s", reportPath)
-	return reportPath, nil
 }
 
 // convertToFilterResponses 转换响应格式（内存优化版本）

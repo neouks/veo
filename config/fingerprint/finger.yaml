@@ -1,3 +1,5 @@
+# version: 1.0.3
+
 apache-activemq:
   dsl:
     - "contains(body, '<title>Apache ActiveMQ</title>')"
@@ -105,35 +107,6 @@ aspnet-mvc:
     - "contains(body, 'asp.net mvc application</p>')"
     - "contains(header, 'ASP.NET_SessionId','ASP.NET','AspNetMvc')"
 
-
-cisco-iox:
-  dsl:
-    - "contains(body, 'var g_url_version = \"/iox/api/v2\"')"
-
-cisco-webex:
-  dsl:
-    - "contains(body, 'alt=\"cisco webex meetings server\"')"
-
-ciscovpn:
-  dsl:
-    - "contains(body, '/+CSCOE+/logon.html')"
-
-citadel-servers:
-  dsl:
-    - "contains(body, '<div class=\"boxlabel\">citadel server - powered by')"
-
-citec-system:
-  dsl:
-    - "contains(body, '正在使用腾讯qq帐号登录消防联网系统')"
-
-citrix-metaframe:
-  dsl:
-    - "contains(body, 'window.location=\"/Citrix/MetaFrame')"
-
-citrix-receiver:
-  dsl:
-    - "contains(body, 'upgradeavailable-already-installed-separator bar-separator')"
-
 citrix-xcp:
   dsl:
     - "contains(body, '<p/>citrix systems, inc. xcp 1.6.10')"
@@ -151,18 +124,6 @@ cmspro:
   dsl:
     - "contains(body, '开普互联')"
     - "contains(body, 'CMS内容管理系统')"
-
-cmstuan:
-  dsl:
-    - "contains(body, 'content=\"开源团主机管理系统')"
-
-cndatacom-smsp:
-  dsl:
-    - "contains(body, '/smrc/resources/default/')"
-
-cnoa-oa:
-  dsl:
-    - "contains(body, 'powered by cnoa.cn')"
 
 cnpower-oa:
   dsl:
@@ -190,10 +151,6 @@ cpanel:
     - "contains(body, 'cpanel_magic_revision')"
     - "contains(body, 'go.cpanel.net')"
 
-d-link:
-  dsl:
-    - "icon('/favicon.ico', '107579220745d3b21461c23024d6c4a3')"
-
 dahua-wpms:
   dsl:
     - "contains(body, '<li id=\"DSS-help\">')"
@@ -215,10 +172,6 @@ dbshop:
   dsl:
     - "contains(body, 'content=\"dbshop')"
 
-dcn:
-  dsl:
-    - "contains(body, 'dcfos web management')"
-
 dedecms:
   dsl:
     - "contains(body, '<div><h3>dedecms error warning!</h3>')"
@@ -235,21 +188,9 @@ dian-diagnostics:
   dsl:
     - "contains(body, 'src=\"/resources/pages/img/logo.svg\"')"
 
-diancms:
-  dsl:
-    - "contains(body, 'diancms_用户登陆引用')"
-
-diaowen-system:
-  dsl:
-    - "contains(body, 'powered by <a href=\"http://www.dwsurvey.net\" style=')"
-
 discuz:
   dsl:
     - "contains(body, 'powered by <strong><a href=\"http://www.discuz.net')"
-
-diyou-p2p:
-  dsl:
-    - "contains(body, 'src=\"/dyweb/dythemes')"
 
 django:
   dsl:
@@ -263,26 +204,6 @@ docebolms:
   dsl:
     - "contains(body, 'powered by docebo')"
 
-doclever:
-  dsl:
-    - "contains(body, '@click.prevent=\"login\" :loading=\"loginpending\"')"
-
-docmail-cwindow:
-  dsl:
-    - "contains(body, '<a href=\"http://www.docmail.cn\" target=\"_blank\">')"
-
-document-security-management-system:
-  dsl:
-    - "contains(body, 'src=\"/drm/encjs/barrett.js\"')"
-
-dokuwiki:
-  dsl:
-    - "icon('/favicon.ico', '3ef81fad2a3deaeb19f02c9cf67ed8eb')"
-
-dotclear:
-  dsl:
-    - "contains(body, 'powered by <a href=\"http://dotclear.org/')"
-
 drugpak:
   dsl:
     - "contains(body, '/dplimg/dpstyle.css')"
@@ -290,10 +211,6 @@ drugpak:
 drupal:
   dsl:
     - "contains(body, '/sites/all/themes/')"
-
-drwebantivirus:
-  dsl:
-    - "contains(body, '/avdesk/includes/system/templates/images/logo_en.png')"
 
 dspace:
   dsl:
@@ -314,10 +231,6 @@ dvwa:
 dzzoffice-product:
   dsl:
     - "contains(body, 'misc.php?mod=sendmail')"
-
-e-plugger-srm:
-  dsl:
-    - "contains(body, '科研管理系统，北京易普拉格科技')"
 
 e-soonlink:
   dsl:
@@ -359,10 +272,6 @@ ebrigade-erp:
   dsl:
     - "contains(body, \"class='btn btn-ebrigade btn-lg'\")"
 
-ecash-system:
-  dsl:
-    - "contains(body, '<br>欢迎使用e-cash系统')"
-
 泛微ecology/emobile:
   dsl:
     - "contains(body, 'window.apiprifix = \"/emp\";')"
@@ -397,29 +306,9 @@ f5-big-ip:
   dsl:
     - "contains(body, 'content=\"F5 Networks, Inc.\"')"
 
-facemeeting-meeting:
+飞视美会议:
   dsl:
     - "contains(body, 'class=\"subnav\">飞视美</div>')"
-
-falcon:
-  dsl:
-    - "contains(body, 'textarea class=\"form-control endpoints')"
-
-falipu-iot:
-  dsl:
-    - "contains(body, 'id=\"t1\">安全、稳定、安全</div>')"
-
-fangmail:
-  dsl:
-    - "contains(body, '/fangmail/cgi/index.cgi')"
-
-fangpage-exam:
-  dsl:
-    - "contains(body, '/sites/exam/statics/css/login.css')"
-
-fanpusoft-construction-work-oa:
-  dsl:
-    - "contains(body, '/dwr/interface/loginservice.js')"
 
 fanwe:
   dsl:
@@ -428,10 +317,6 @@ fanwe:
 faq-manager:
   dsl:
     - "contains(body, '<a href=\"admin/\">admin area</a></td></tr></table></body></html>')"
-
-faqrobot:
-  dsl:
-    - "contains(body, '南京云问网络技术有限公司')"
 
 fastadmin-framework:
   path:
@@ -454,10 +339,6 @@ fit2cloud-jumpserver:
     - "contains(body, 'pathname.startsWith('/core')"
     - "contains(body, 'JumpServer 开源堡垒机')"
     - "contains(body, 'core/auth/password/forget/previewing')"
-
-flower-celery-monitoring-tool:
-  dsl:
-    - "contains(body, '<a class=\"brand\" href=\"/\">flower</a>')"
 
 forsun:
   dsl:
@@ -491,7 +372,7 @@ geoserver:
     - "/IMEE-GlobeServer/"
   dsl:
     - "contains(body, 'class=\"geoserver lebeg','GeoServerBasePage','_spring_security_remember_me','navigation-tab-content plain')"
-    - "contains(body, 'Geocoder','geosolutions')"
+    - "contains(body,'geosolutions')"
     - "contains(header, './?0')"
 
 geotrust-cert:
@@ -563,10 +444,6 @@ h3c-web:
     - "contains(body, 'Web网管用户登录')"
     - "contains(body, 'china_logo.jpg')"
 
-h3c:
-  dsl:
-    - "contains(body, 'service@h3c.com')"
-
 h3cer3200:
   dsl:
     - "contains(body, 'ER3200')"
@@ -582,26 +459,6 @@ hadoop-administration:
 hadoop-hue:
   dsl:
     - "contains(body, 'hue and the hue logo are trademarks of cloudera, inc.')"
-
-haidaoshop:
-  dsl:
-    - "contains(body, 'haidao.web.general.js')"
-
-haitian-oa:
-  dsl:
-    - "contains(body, 'mshtml 8.00.6001.19298')"
-
-hanmasoft:
-  dsl:
-    - "contains(body, 'content=\"汉码软件')"
-
-hanming-video-conferencing:
-  dsl:
-    - "contains(body, '/resources/fmweb/other/js/login.js')"
-
-hanna-drawing-service:
-  dsl:
-    - "contains(body, 'hanna图纸服务')"
 
 hanweb-system:
   dsl:
@@ -636,14 +493,6 @@ huawei-jump-server:
     - "contains(body, 'value=pluginLoaded')"
     - "icon('/favicon.ico', '1f2d27250647de902d396b75d9a2b0cf')"
 
-infosec-utrust:
-  dsl:
-    - "contains(body, 'china utrust infortech co,.ltd')"
-
-infowarelab-system-management-center:
-  dsl:
-    - "contains(body, '<div class=\"main_supporterbar\">')"
-
 inspinia:
   dsl:
     - "contains(body, 'inspinia')"
@@ -655,10 +504,6 @@ inspur-ec-government-approval-platform:
 inspur-incloud-sphere:
   dsl:
     - "contains(body, 'class=\"easyui-layout')"
-
-invision-ipboard:
-  dsl:
-    - "contains(body, 'ipb.vars')"
 
 invision-powerboard:
   dsl:
@@ -805,10 +650,6 @@ jspxcms:
   dsl:
     - "contains(body, 'Powered by Jspxcms')"
 
-jstorm:
-  dsl:
-    - "contains(body, 'content=\"jstorm')"
-
 jsyhit-system:
   dsl:
     - "contains(body, 'content=\"仪化产品质量查询系统\"')"
@@ -918,18 +759,6 @@ qax-secfox:
     - "contains(body, 'type=application/x-xtx-axhost')"
     - "icon('/favicon.ico', 'f3147f50cfd23455cb5fdf0dcd890dac')"
 
-qax-useso:
-  dsl:
-    - "contains(body, 'libs.useso.com')"
-
-qianxing-oa:
-  dsl:
-    - "contains(body, 'count/mystat.asp')"
-
-qm-system:
-  dsl:
-    - "contains(body, 'src=\"polyfills.js')"
-
 qz-safe-mail:
   dsl:
     - "contains(body, '/qzmail/index.php')"
@@ -988,10 +817,6 @@ ruijie-smart-web:
   dsl:
     - "contains(body, '锐捷交换机')"
 
-ruijie:
-  dsl:
-    - "contains(body, '4008 111 000')"
-
 深信服上网行为管理:
   dsl:
     - "contains(body, 'class=\"info-inner\"')"
@@ -999,10 +824,6 @@ ruijie:
 sangfor-branch-business-center:
   dsl:
     - "contains(body, \"location.href = '/bbc/index'\")"
-
-sangfor-employee-internet-management:
-  dsl:
-    - "contains(body, 'internet authentication system')"
 
 sangfor-ipsec-vpn:
   dsl:
@@ -1027,17 +848,9 @@ sangfor-sip:
     - "contains(body, '<version>')"
     - "contains(body, 'portal/jssdk/api')"
 
-sangfor-tamper-resistance:
-  dsl:
-    - "contains(body, 'href=\"tamper/style/control.css\"')"
-
 sangfor-vd:
   dsl:
     - "contains_all(body, 'login_psw.csp','VDI')"
-
-seafile:
-  dsl:
-    - "contains(body, 'seafile')"
 
 serv-u-ftp:
   dsl:
@@ -1224,11 +1037,6 @@ lansecs:
   dsl:
     - "contains(body, 'lansecs第二代防火墙')"
 
-vpn:
-  dsl:
-    - "contains(body, '/vpn/common/js/leadsec.js')"
-    - "contains(body, '/vpn/user/common/custom/auth_home.css')"
-
 topidp:
   dsl:
     - "contains(body, '天融信入侵防御系统topidp')"
@@ -1264,19 +1072,10 @@ csmail:
   dsl:
     - "contains(body, '<frame src=\"/mainframe_zh-cn.html\" />')"
 
-erp:
-  dsl:
-    - "icon('/favicon.ico', 'c68b15c45cf80115a943772f7d0028a6')"
-
 yozodcs:
   dsl:
     - "contains(body, '<title>永中文档在线预览DCS</title>')"
     - "contains(body, 'www.yozodcs.com')"
-
-waf:
-  dsl:
-    - "contains(body, 'Redirect to...')"
-    - "contains(body, '/LogInOut.php')"
 
 深信服atrust:
   dsl:
@@ -1305,7 +1104,7 @@ rg-ew1200g:
   dsl:
     - "contains_all(body, '/static/img/title.ico','锐捷','/js/app')"
 
-spring-env:
+springboot-env:
   dsl:
     - "contains(body, 'logback','systemEnvironment')"
 
@@ -1384,8 +1183,7 @@ exchange:
 
 druid:
   dsl:
-    - "contains(body, 'Druid Stat Index')"
-    - "contains(body, 'druid.login.unamecr')"
+    - "contains(body, 'Druid Stat Index','druid.login.unamecr','druid.login')"
 
 activemq:
   dsl:
@@ -1551,10 +1349,6 @@ springboot:
     - "icon('/favicon.ico', '0488faca4c19046b94d07c3ee83cf9d6')"
     - "contains(body, 'Whitelabel Error Page')"
     - "contains(body, 'This application has no explicit mapping for')"
-
-alibaba-druid:
-  dsl:
-    - "contains(body, 'druid.index.init')"
 
 360-ngfw:
   dsl:
@@ -1783,10 +1577,6 @@ secworld-vpn:
   dsl:
     - "contains(body, 'secworld')"
 
-semcms:
-  dsl:
-    - "contains(body, 'powered by <a href=\"http://www.sem-cms.com\"')"
-
 sidao-oa:
   dsl:
     - "contains(body, '思道OA')"
@@ -2005,12 +1795,6 @@ unibox:
     - "contains(body, 'ldapHosts[i]')"
     - "contains(body, '/fort/login')"
 
-资管云:
-  dsl:
-    - "contains(body, 'adminfront/login/')"
-    - "contains(url, 'adminfront/login/')"
-    - "contains(body, 'progid:DXImageTransform.Microsoft.AlphaImageLoader')"
-
 用友bip:
   dsl:
     - "contains(body, 'iuap-apcom-workbench')"
@@ -2213,10 +1997,6 @@ nexus-repository-manager:
     - "contains(body, 'Powered by <b>4images')"
     - "contains(body, '4homepages')"
 
-53bk数字报刊系统:
-  dsl:
-    - "contains(body, '/Comja/')"
-
 78-oa:
   dsl:
     - "contains(body, '/resource/javascript/system/runtime.min.js')"
@@ -2226,10 +2006,6 @@ Citrix-Gateway:
     - "contains(body, 'Citrix Gateway</title>')"
     - "contains(body, 'receiver/css/ctxs.no-js-ui.min.css')"
     - "contains(body, '_ctxstxt_AddAll')"
-
-apache-airflow:
-  dsl:
-    - "title('Airflow - Login')"
 
 apache-shenyu:
   dsl:
@@ -2902,14 +2678,6 @@ yzmcms:
     - "contains(body, '微擎 - 公众平台自助引擎')"
     - "contains(body, 'www.w7.cc')"
 
-快云服务器小助手:
-  dsl:
-    - "title('快云服务器助手')"
-
-思迪数据池管理平台:
-  dsl:
-    - "contains(body, '思迪')"
-
 惠商管理系统:
   dsl:
     - "title('惠商+管理系统')"
@@ -2962,7 +2730,7 @@ yzmcms:
     - "contains(body, 'update/exec.asp')"
     - "contains(body, 'images/full.gif')"
 
-有waf:
+waf:
   dsl:
     - "contains(header, 'WAF/')"
 
@@ -3065,14 +2833,6 @@ yzmcms:
     - "contains(body, 'ueditor.all.js')"
     - "contains(body, 'UE.getEditor')"
 
-皓峰防火墙:
-  dsl:
-    - "title('皓峰防火墙系统登录')"
-
-碧海云盒:
-  dsl:
-    - "contains(body, '碧海云盒')"
-
 禾匠点企来客服系统:
   dsl:
     - "contains(body, 'const _scriptUrl')"
@@ -3108,17 +2868,9 @@ yzmcms:
   dsl:
     - "contains(body, 'resources/css/login_yzm.css')"
 
-管家婆全渠道业务同步中心:
-  dsl:
-    - "title('管家婆全渠道业务同步中心')"
-
 管理后台登录:
   dsl:
     - "contains_all(body, '管理','登录','login')"
-
-网动统一通信平台active-uc:
-  dsl:
-    - "title('网动统一通信平台(Active UC)')"
 
 网康科技互联网控制网关:
   dsl:
@@ -3188,13 +2940,6 @@ yzmcms:
     - "contains(body, 'ry-ui.css')"
     - "contains(body, 'ry-ui.js')"
 
-蓝凌-oa:
-  dsl:
-    - "contains(body, 'sys/ui/extend/theme/default/style/icon.css')"
-    - "contains(body, 'sys/ui/extend/theme/default/style/profile.css')"
-    - "contains(body, '蓝凌软件')"
-    - "contains(body, 'App_Themes/Login')"
-
 蓝凌eis智慧协同平台:
   dsl:
     - "contains(body, '/scripts/jquery.landray.common.js')"
@@ -3235,14 +2980,8 @@ yzmcms:
 
 金山终端安全:
   dsl:
-    - "contains(body, '终端安全系统')"
     - "contains(body, 'setup/kanclient.exe')"
     - "contains(body, 'iepngfix/iepngfix_tilebg.js')"
-
-金山终端安全管理系统:
-  dsl:
-    - "contains(body, 'iepngfix/iepngfix_tilebg.js')"
-    - "contains(body, 'mysqlStat')"
 
 金蝶-eas:
   dsl:
@@ -3298,16 +3037,6 @@ yzmcms:
   dsl:
     - "title('欢迎登录易宝OA系统')"
 
-飞鱼星上网行为管理:
-  dsl:
-    - "contains(body, 'css/R1Login.css')"
-    - "contains(body, 'share.ti_username')"
-
-飞鱼星路由器行为管理:
-  dsl:
-    - "contains(body, 'content=\"0.2;')"
-    - "contains(body, '/home/login.html')"
-
 骑士-74cms:
   dsl:
     - "contains(body, '74cms')"
@@ -3329,18 +3058,10 @@ layui:
   dsl:
     - "contains(body, 'layui/layui.js')"
 
-springboot-actuator:
-  dsl:
-    - "contains_all(body, '_links','self','actuator')"
-
 api-docs:
   dsl:
     - "contains_all(body, 'swagger','info','paths')"
-
-山东先森网络:
-  dsl:
-    - "contains(body, 'xiansen_logo.png','山东先森网络科技有限公司提供技术支持','images/login_btn.gif')"
-    - "contains(url, '/zhqw/')"
+    - "contains_all(body, 'openapi','info','paths')"
 
 WebService服务:
   dsl:
@@ -3422,11 +3143,11 @@ ArcGIS:
 
 新点OA:
   dsl:
-  - "contains(body, '新点政务','epoint','loginaction/getLoginData')"
+  - "contains(body, '新点政务','epoint')"
 
 next.js:
   dsl:
-  - "contains(body, '/_next/static/chunks/app/','/_next/')"
+  - "contains(body, '/_next/static/chunks/app/','/_next/','window._next_f')"
 
 React Server:
   dsl:
@@ -3435,7 +3156,28 @@ React Server:
 疑似文件上传表单:
   dsl:
   - "contains(body, 'enctype=\"multipart/form-data\"','input type=\"file\"','placeholder=\"请选择文件\"')"
+  - "contains(body, '请选择文件','选择多文件','选择文件','UploadFile')"
+
 
 SOAP:
   dsl:
   - "contains(body, 'soapenv:Envelope','soapenv:Body','soap-env:envelope','soap-env:Body')"
+
+springboot-actuator:
+  dsl:
+  - "contains_all(body, '_links','self','href')"
+
+智能客流大数据平台:
+  tags: red,fileupload
+  dsl:
+  - "contains(body, '智能客流大数据平台','img/dl/login_logo.png','login_l_img')"
+
+PPGo_Job管理后台:
+  tags: red,infoleak,high
+  dsl:
+  - "contains(body, 'PPGo_Job管理后台','icon: 2,shade:0.3,time:1000')"
+
+spring-gateway:
+  tags: red,rce,critical
+  dsl:
+  - "contains_all(body, 'gateway','\"href\":','templated')"

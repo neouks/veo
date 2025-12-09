@@ -97,7 +97,7 @@ func (cc *ConnectivityChecker) isReachableWithRedirect(targetURL string, maxRedi
 	defer resp.Body.Close()
 
 	// 简化判断：只要能成功建立HTTP连接并收到响应，就认为目标存活
-	logger.Debugf("✅ 目标可连通: %s [%d] 耗时: %v", targetURL, resp.StatusCode, elapsed)
+	logger.Debugf("目标可连通: %s [%d] 耗时: %v", targetURL, resp.StatusCode, elapsed)
 	return true
 }
 

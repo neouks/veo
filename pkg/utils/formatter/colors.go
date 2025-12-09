@@ -48,6 +48,10 @@ const (
 	// 指纹标题专用颜色（#3eede7）
 	ColorFingerprintTitleCyan         = "\033[38;2;62;237;231m"
 	ColorFingerprintTitleCyanFallback = "\033[36m"
+
+	// 标签专用颜色（#ff2121）
+	ColorTagHighlight         = "\033[38;2;255;33;33m"
+	ColorTagHighlightFallback = "\033[31m"
 )
 
 // FormatProtocol 格式化协议显示（加粗绿色）
@@ -96,8 +100,18 @@ func FormatStatusCode(statusCode int) string {
 		return statusStr // 如果禁用彩色输出，直接返回状态码
 	}
 
-	// 所有状态码统一使用品牌绿色加粗显示
-	return ColorBold + getBrandGreenColor() + statusStr + ColorReset
+	var color string
+
+	switch {
+	case statusCode == 403:
+		color = ColorBold + ColorLightRed
+	case statusCode == 404 || (statusCode >= 500 && statusCode < 600):
+		color = ColorBold + ColorYellow
+	default:
+		color = ColorBold + getBrandGreenColor()
+	}
+
+	return color + statusStr + ColorReset
 }
 
 // FormatTitle 格式化标题显示
@@ -220,20 +234,22 @@ func FormatFingerprintDisplay(name, rule string, showRule bool) string {
 		}
 	}
 	return "<" + FormatFingerprintName(name) + ">"
+
 }
 
 // FormatFingerprintTag 格式化指纹标签显示（指纹识别专用）
 func FormatFingerprintTag(tag string) string {
+	display := fmt.Sprintf("[%s]", strings.TrimSpace(tag))
+
 	if !shouldUseColors() {
-		return tag // 如果禁用彩色输出，直接返回标签
+		return display // 如果禁用彩色输出，直接返回标签
 	}
 
 	// 根据标签类型选择颜色
 	var color string
 	switch tag {
-	case "主动探测":
-		// 主动探测：加粗红色
-		color = ColorBold + ColorRed
+	case "主动探测", "404探测":
+		color = ColorBold + getTagHighlightColor()
 	case "被动识别":
 		// 被动识别：加粗绿色
 		color = ColorBold + ColorGreen
@@ -242,7 +258,7 @@ func FormatFingerprintTag(tag string) string {
 		color = ColorBold
 	}
 
-	return color + tag + ColorReset
+	return color + display + ColorReset
 }
 
 // FormatBold 将文本加粗显示（若启用颜色）
@@ -379,6 +395,20 @@ func getFingerprintTitleColor() string {
 	// 	return ColorFingerprintTitleCyan
 	// }
 	// return ColorFingerprintTitleCyanFallback
+}
+
+// getTagHighlightColor 获取标签高亮颜色（支持降级）
+func getTagHighlightColor() string {
+	if !shouldUseColors() {
+		return ""
+	}
+	return ColorTagHighlightFallback
+
+	// 如需启用真彩色，可恢复以下逻辑：
+	// if supportsTrueColor() {
+	//     return ColorTagHighlight
+	// }
+	// return ColorTagHighlightFallback
 }
 
 // ============================================================================

@@ -17,6 +17,7 @@ type FilterConfig struct {
 	InvalidPageThreshold int   // 无效页面阈值（主要筛选）
 	SecondaryThreshold   int   // 二次筛选阈值
 	EnableStatusFilter   bool  // 是否启用状态码过滤
+	DisableHashFilter    bool  // 是否禁用哈希过滤
 
 	// Content-Type过滤相关配置
 	EnableContentTypeFilter bool     // 是否启用Content-Type过滤
@@ -33,6 +34,7 @@ func DefaultFilterConfig() *FilterConfig {
 		InvalidPageThreshold: 3,
 		SecondaryThreshold:   1,
 		EnableStatusFilter:   true,
+		DisableHashFilter:    false,
 
 		// Content-Type过滤默认配置
 		EnableContentTypeFilter: true,
@@ -96,7 +98,6 @@ type ResponseFilter struct {
 	hashFilter        HashFilterStrategy        // 哈希过滤策略
 	secondaryFilter   SecondaryFilterStrategy   // 二次筛选策略
 	contentTypeFilter ContentTypeFilterStrategy // Content-Type过滤策略
-	filterChain       *FilterChain              // 过滤链
 	mu                sync.RWMutex              // 读写锁
 
 	// [新增] 可选的指纹识别引擎（用于目录扫描结果的二次识别）
@@ -113,12 +114,15 @@ func NewResponseFilter(config *FilterConfig) *ResponseFilter {
 
 	// 创建过滤策略（传递容错阈值）
 	statusCodeFilter := NewStatusCodeFilter(config.ValidStatusCodes)
-	hashFilter := NewHashFilter(config.InvalidPageThreshold, config.FilterTolerance)
-	secondaryFilter := NewSecondaryFilter(config.SecondaryThreshold, config.FilterTolerance)
+	var hashFilter HashFilterStrategy
+	var secondaryFilter SecondaryFilterStrategy
+	if !config.DisableHashFilter {
+		hashFilter = NewHashFilter(config.InvalidPageThreshold, config.FilterTolerance)
+		secondaryFilter = NewSecondaryFilter(config.SecondaryThreshold, config.FilterTolerance)
+	} else {
+		logger.Infof("哈希过滤已禁用 (--no-filter)，将保留所有目录扫描响应")
+	}
 	contentTypeFilter := NewContentTypeFilter(config.FilteredContentTypes)
-
-	// 创建过滤链
-	filterChain := NewFilterChain()
 
 	rf := &ResponseFilter{
 		config:            config,
@@ -126,11 +130,7 @@ func NewResponseFilter(config *FilterConfig) *ResponseFilter {
 		hashFilter:        hashFilter,
 		secondaryFilter:   secondaryFilter,
 		contentTypeFilter: contentTypeFilter,
-		filterChain:       filterChain,
 	}
-
-	// 根据配置添加过滤策略到过滤链
-	rf.rebuildFilterChain()
 
 	logger.Debugf("响应过滤器创建完成 - 容错阈值: %d 字节", config.FilterTolerance)
 	return rf
@@ -217,23 +217,69 @@ func (rf *ResponseFilter) FilterResponses(responses []interfaces.HTTPResponse) *
 		result.SecondaryHashResults = rf.secondaryFilter.GetSecondaryHashResults()
 	}
 
+	// 步骤6: 结果去重 (基于URL)
+	// 解决多个不同Payload重定向到同一个最终URL导致的结果重复问题
+	result.ValidPages = rf.deduplicateValidPages(result.ValidPages)
+
+	// 步骤7: 对所有页面执行指纹识别（包括被过滤的页面）
+	// 这样在报告中所有页面都能显示指纹信息
+	rf.mu.RLock()
+	hasEngine := rf.fingerprintEngine != nil
+	rf.mu.RUnlock()
+
+	if hasEngine {
+		// 对 ValidPages 执行指纹识别
+		for i := range result.ValidPages {
+			matches, _ := rf.performFingerprintRecognition(&result.ValidPages[i])
+			if len(matches) > 0 {
+				result.ValidPages[i].Fingerprints = matches
+			}
+		}
+
+		// 对 PrimaryFilteredPages 执行指纹识别
+		for i := range result.PrimaryFilteredPages {
+			matches, _ := rf.performFingerprintRecognition(&result.PrimaryFilteredPages[i])
+			if len(matches) > 0 {
+				result.PrimaryFilteredPages[i].Fingerprints = matches
+			}
+		}
+
+		// 对 StatusFilteredPages 执行指纹识别
+		for i := range result.StatusFilteredPages {
+			matches, _ := rf.performFingerprintRecognition(&result.StatusFilteredPages[i])
+			if len(matches) > 0 {
+				result.StatusFilteredPages[i].Fingerprints = matches
+			}
+		}
+
+		logger.Debugf("指纹识别完成 - ValidPages: %d, PrimaryFiltered: %d, StatusFiltered: %d",
+			len(result.ValidPages), len(result.PrimaryFilteredPages), len(result.StatusFilteredPages))
+	}
+
 	return result
 }
 
-// rebuildFilterChain 根据配置重建过滤链
-func (rf *ResponseFilter) rebuildFilterChain() {
-	rf.filterChain.ClearStrategies()
+// deduplicateValidPages 对有效页面进行去重（基于URL）
+func (rf *ResponseFilter) deduplicateValidPages(pages []interfaces.HTTPResponse) []interfaces.HTTPResponse {
+	if len(pages) == 0 {
+		return pages
+	}
 
-	// 根据配置添加策略
-	if rf.config.EnableStatusFilter && rf.statusCodeFilter != nil {
-		rf.filterChain.AddStrategy(rf.statusCodeFilter)
+	uniquePages := make([]interfaces.HTTPResponse, 0, len(pages))
+	seen := make(map[string]struct{})
+
+	for _, page := range pages {
+		if _, exists := seen[page.URL]; !exists {
+			seen[page.URL] = struct{}{}
+			uniquePages = append(uniquePages, page)
+		}
 	}
-	if rf.hashFilter != nil {
-		rf.filterChain.AddStrategy(rf.hashFilter)
+
+	if len(uniquePages) < len(pages) {
+		logger.Debugf("结果去重: %d -> %d (移除重复 %d 个)", len(pages), len(uniquePages), len(pages)-len(uniquePages))
 	}
-	if rf.secondaryFilter != nil {
-		rf.filterChain.AddStrategy(rf.secondaryFilter)
-	}
+
+	return uniquePages
 }
 
 // UpdateConfig 更新过滤器配置
@@ -253,10 +299,6 @@ func (rf *ResponseFilter) UpdateConfig(config *FilterConfig) {
 	if rf.secondaryFilter != nil {
 		rf.secondaryFilter.UpdateThreshold(config.SecondaryThreshold)
 	}
-
-	// 重建过滤链
-	rf.rebuildFilterChain()
-
 }
 
 // GetConfig 获取当前配置
@@ -284,7 +326,6 @@ func (rf *ResponseFilter) Reset() {
 	if rf.secondaryFilter != nil {
 		rf.secondaryFilter.Reset()
 	}
-	rf.filterChain.Reset()
 
 	logger.Debug("过滤器状态已重置")
 }
@@ -316,7 +357,6 @@ func (rf *ResponseFilter) SetStatusCodeFilter(filter StatusCodeFilterStrategy) {
 	defer rf.mu.Unlock()
 
 	rf.statusCodeFilter = filter
-	rf.rebuildFilterChain()
 }
 
 // SetHashFilter 设置哈希过滤策略
@@ -325,7 +365,6 @@ func (rf *ResponseFilter) SetHashFilter(filter HashFilterStrategy) {
 	defer rf.mu.Unlock()
 
 	rf.hashFilter = filter
-	rf.rebuildFilterChain()
 }
 
 // SetSecondaryFilter 设置二次筛选策略
@@ -334,7 +373,6 @@ func (rf *ResponseFilter) SetSecondaryFilter(filter SecondaryFilterStrategy) {
 	defer rf.mu.Unlock()
 
 	rf.secondaryFilter = filter
-	rf.rebuildFilterChain()
 }
 
 // GetPageHashCount 获取页面哈希统计数量（兼容旧接口）
@@ -523,21 +561,18 @@ func (rf *ResponseFilter) printValidPages(pages []interfaces.HTTPResponse) {
 	for idx := range pages {
 		page := &pages[idx]
 
-		rf.mu.RLock()
-		hasEngine := rf.fingerprintEngine != nil
-		rf.mu.RUnlock()
+		// 使用已经识别好的指纹信息（在 FilterResponses 中已完成）
+		matches := page.Fingerprints
+		var fingerprintUnion string
 
-		var (
-			matches          []interfaces.FingerprintMatch
-			fingerprintUnion string
-		)
-
-		// 先执行指纹识别，以便根据结果决定标题颜色
-		if hasEngine {
-			matches, fingerprintUnion = rf.performFingerprintRecognition(page)
-			if len(matches) > 0 {
-				page.Fingerprints = matches
+		// 格式化指纹显示
+		if len(matches) > 0 {
+			// 转换为指针列表以便使用 formatFingerprintMatches
+			matchPtrs := make([]*interfaces.FingerprintMatch, len(matches))
+			for i := range matches {
+				matchPtrs[i] = &matches[i]
 			}
+			fingerprintUnion = rf.formatFingerprintMatches(matchPtrs)
 		}
 
 		fingerprintParts := []string{}
@@ -557,6 +592,13 @@ func (rf *ResponseFilter) printValidPages(pages []interfaces.HTTPResponse) {
 
 		var messageBuilder strings.Builder
 		messageBuilder.WriteString(line)
+
+		// 如果 URL 过长（超过 60 字符），在下一行输出完整 URL 方便复制
+		if len(page.URL) > 60 {
+			messageBuilder.WriteString("\n")
+			messageBuilder.WriteString("  └─ ")
+			messageBuilder.WriteString(page.URL)
+		}
 
 		if rf.showFingerprintSnippet && len(matches) > 0 {
 			var snippetLines []string

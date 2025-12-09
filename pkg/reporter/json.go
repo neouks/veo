@@ -15,15 +15,6 @@ import (
 
 // CombinedAPIResponse 统一的API/CLI JSON响应结构
 type CombinedAPIResponse struct {
-	Code        int             `json:"code"`
-	Message     string          `json:"message,omitempty"`
-	FingerCount int             `json:"finger_count"`
-	DirCount    int             `json:"dirscan_count"`
-	TimeUsedMs  int64           `json:"time_used"`
-	Data        CombinedAPIData `json:"data"`
-}
-
-type CombinedAPIData struct {
 	Fingerprint []FingerprintAPIPage `json:"fingerprint,omitempty"`
 	Dirscan     []DirscanAPIPage     `json:"dirscan,omitempty"`
 }
@@ -50,10 +41,18 @@ type DirscanAPIPage struct {
 type SDKFingerprintMatchOutput struct {
 	RuleName    string `json:"rule_name"`
 	RuleContent string `json:"rule_content,omitempty"`
-	Snippet     string `json:"snippet,omitempty"`
 }
 
-// JSONReportGenerator JSON报告生成器
+// buildCombinedAPIResponse 构建统一的API/CLI JSON响应结构
+func (jrg *JSONReportGenerator) buildCombinedAPIResponse(dirPages []interfaces.HTTPResponse, fpPages []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, scanParams map[string]interface{}) CombinedAPIResponse {
+	dirPagesAPI := makeDirscanPageResults(dirPages)
+	fpPagesAPI := makeFingerprintPageResults(fpPages, matches)
+
+	return CombinedAPIResponse{
+		Fingerprint: fpPagesAPI,
+		Dirscan:     dirPagesAPI,
+	}
+}
 type JSONReportGenerator struct {
 	startTime  time.Time
 	outputPath string
@@ -97,30 +96,6 @@ func (jrg *JSONReportGenerator) GenerateFingerprintReport(responses []interfaces
 	return jrg.saveCombinedResponse(resp, target, "fingerprint")
 }
 
-// GenerateJSONDirscanReport 生成目录扫描JSON报告的公共接口
-func GenerateJSONDirscanReport(responses []interfaces.HTTPResponse, target string, scanParams map[string]interface{}) (string, error) {
-	generator := NewJSONReportGenerator()
-	return generator.GenerateDirscanReport(&interfaces.FilterResult{ValidPages: responses}, target, scanParams)
-}
-
-// GenerateJSONFingerprintReport 生成指纹识别JSON报告的公共接口
-func GenerateJSONFingerprintReport(responses []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, target string, scanParams map[string]interface{}) (string, error) {
-	generator := NewJSONReportGenerator()
-	return generator.GenerateFingerprintReport(responses, matches, stats, target, scanParams)
-}
-
-// GenerateCustomJSONDirscanReport 生成自定义路径的目录扫描JSON报告
-func GenerateCustomJSONDirscanReport(responses []interfaces.HTTPResponse, target string, scanParams map[string]interface{}, outputPath string) (string, error) {
-	generator := NewCustomJSONReportGenerator(outputPath)
-	return generator.GenerateDirscanReport(&interfaces.FilterResult{ValidPages: responses}, target, scanParams)
-}
-
-// GenerateCustomJSONFingerprintReport 生成自定义路径的指纹识别JSON报告
-func GenerateCustomJSONFingerprintReport(responses []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, target string, scanParams map[string]interface{}, outputPath string) (string, error) {
-	generator := NewCustomJSONReportGenerator(outputPath)
-	return generator.GenerateFingerprintReport(responses, matches, stats, target, scanParams)
-}
-
 func GenerateCombinedJSON(dirPages []interfaces.HTTPResponse, fingerprintPages []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, scanParams map[string]interface{}) (string, error) {
 	generator := NewJSONReportGenerator()
 	result := generator.buildCombinedAPIResponse(dirPages, fingerprintPages, matches, stats, scanParams)
@@ -155,27 +130,15 @@ func extractResponses(filterResult *interfaces.FilterResult) []interfaces.HTTPRe
 }
 
 // buildCombinedAPIResponse 构建统一的API/CLI JSON响应结构
-func (jrg *JSONReportGenerator) buildCombinedAPIResponse(dirPages []interfaces.HTTPResponse, fpPages []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, scanParams map[string]interface{}) CombinedAPIResponse {
-	dirPagesAPI := makeDirscanPageResults(dirPages)
-	fpPagesAPI := makeFingerprintPageResults(fpPages, matches)
-
-	duration := time.Since(jrg.startTime).Milliseconds()
-
-	resp := CombinedAPIResponse{
-		Code:        0,
-		Message:     "ok",
-		FingerCount: len(fpPagesAPI),
-		DirCount:    len(dirPagesAPI),
-		TimeUsedMs:  duration,
-		Data: CombinedAPIData{
-			Fingerprint: fpPagesAPI,
-			Dirscan:     dirPagesAPI,
-		},
-	}
-
-	// 保持兼容：若需要总数可用 summary.Total
-	return resp
-}
+// func (jrg *JSONReportGenerator) buildCombinedAPIResponse(dirPages []interfaces.HTTPResponse, fpPages []interfaces.HTTPResponse, matches []types.FingerprintMatch, stats *FingerprintStats, scanParams map[string]interface{}) CombinedAPIResponse {
+// 	dirPagesAPI := makeDirscanPageResults(dirPages)
+// 	fpPagesAPI := makeFingerprintPageResults(fpPages, matches)
+//
+// 	return CombinedAPIResponse{
+// 		Fingerprint: fpPagesAPI,
+// 		Dirscan:     dirPagesAPI,
+// 	}
+// }
 
 func (jrg *JSONReportGenerator) saveCombinedResponse(resp CombinedAPIResponse, target, scanType string) (string, error) {
 	data, err := json.MarshalIndent(resp, "", "  ")
@@ -304,7 +267,6 @@ func groupMatchesByURL(matches []types.FingerprintMatch) map[string][]SDKFingerp
 		grouped[url] = append(grouped[url], SDKFingerprintMatchOutput{
 			RuleName:    match.RuleName,
 			RuleContent: match.DSLMatched,
-			Snippet:     match.Snippet,
 		})
 	}
 	return grouped
@@ -320,7 +282,6 @@ func toSDKMatchesFromInterfaces(matches []interfaces.FingerprintMatch) []SDKFing
 		outputs = append(outputs, SDKFingerprintMatchOutput{
 			RuleName:    match.RuleName,
 			RuleContent: match.Matcher,
-			Snippet:     match.Snippet,
 		})
 	}
 
@@ -346,10 +307,7 @@ func mergeFingerprintOutputs(base []SDKFingerprintMatchOutput, extra []SDKFinger
 
 	for _, item := range extra {
 		key := item.RuleName + "|" + item.RuleContent
-		if idx, ok := keyIndex[key]; ok {
-			if base[idx].Snippet == "" && item.Snippet != "" {
-				base[idx].Snippet = item.Snippet
-			}
+		if _, ok := keyIndex[key]; ok {
 			continue
 		}
 		keyIndex[key] = len(base)

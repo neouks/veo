@@ -5,10 +5,44 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
 	"veo/pkg/utils/shared"
+)
+
+var (
+	scriptContentRe        = regexp.MustCompile(`(?is)<script\b[^>]*>(.*?)</script>`)
+	scriptStripRe          = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
+	htmlTagRe              = regexp.MustCompile(`(?is)<[^>]+>`)
+	jsSingleLineCommentRe  = regexp.MustCompile(`(?m)//.*$`)
+	jsMultiLineCommentRe   = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	jsLocationAssignRe     = regexp.MustCompile(`(?is)(?:window|self|top|parent|document)\s*\.\s*location(?:\.href)?\s*=\s*['"]([^'"]+)['"]`)
+	jsBareLocationAssignRe = regexp.MustCompile(`(?is)\blocation(?:\.href)?\s*=\s*['"]([^'"]+)['"]`)
+	jsLocationFuncRe       = regexp.MustCompile(`(?is)(?:window|self|top|parent|document)\s*\.\s*location\.(?:replace|assign)\(\s*['"]([^'"]+)['"]\s*\)`)
+
+	redirectTextIndicators    = []string{"redirect", "redirecting", "object moved", "click", "这里", "点击", "跳转", "正在跳转", "即将跳转", "页面跳转"}
+	scriptExecutionIndicators = []string{
+		"settimeout",
+		"setinterval",
+		"window.onload",
+		"document.onreadystatechange",
+		"addEventListener('load",
+		"attachEvent('onload",
+	}
+	scriptUserActionIndicators = []string{
+		"onclick",
+		"ondblclick",
+		"onchange",
+		"onsubmit",
+		"onkeydown",
+		"onkeyup",
+		"addEventListener('click",
+		"addEventListener('submit",
+	}
+	maxRedirectTextRuneCount  = 160
+	maxTrustedScriptRuneCount = 240
 )
 
 // HTTPFetcher 定义最小化HTTP客户端接口，供重定向跟随使用。
@@ -57,6 +91,154 @@ func GetHeaderFirst(headers map[string][]string, key string) string {
 		}
 	}
 	return ""
+}
+
+// detectJSRedirectURL 提取脚本中的跳转URL，并通过启发式降低误判
+func detectJSRedirectURL(body string) string {
+	scripts := scriptContentRe.FindAllStringSubmatch(body, -1)
+	if len(scripts) == 0 {
+		return ""
+	}
+
+	hasIndicator := hasRedirectIndicators(body)
+
+	for _, match := range scripts {
+		if len(match) < 2 {
+			continue
+		}
+		script := strings.TrimSpace(match[1])
+		if script == "" {
+			continue
+		}
+
+		cleaned := stripJSComments(script)
+		if cleaned == "" {
+			continue
+		}
+
+		if !shouldTrustJSRedirect(cleaned, hasIndicator) {
+			continue
+		}
+
+		if url := extractLocationFromScript(cleaned); url != "" {
+			return url
+		}
+	}
+
+	return ""
+}
+
+func stripJSComments(script string) string {
+	noSingle := jsSingleLineCommentRe.ReplaceAllString(script, "")
+	noMulti := jsMultiLineCommentRe.ReplaceAllString(noSingle, "")
+	return strings.TrimSpace(noMulti)
+}
+
+func extractLocationFromScript(script string) string {
+	patterns := []*regexp.Regexp{
+		jsLocationFuncRe,
+		jsLocationAssignRe,
+		jsBareLocationAssignRe,
+	}
+
+	for _, re := range patterns {
+		if re == nil {
+			continue
+		}
+		if idx := re.FindStringSubmatch(script); len(idx) >= 2 {
+			// idx[1] contains the captured URL because regexp patterns only use a single capturing group now.
+			return strings.TrimSpace(idx[1])
+		}
+	}
+
+	return ""
+}
+
+func shouldTrustJSRedirect(script string, hasIndicator bool) bool {
+	runeCount := utf8.RuneCountInString(script)
+	if runeCount == 0 || runeCount > maxTrustedScriptRuneCount {
+		return false
+	}
+
+	lower := strings.ToLower(script)
+
+	if hasIndicator {
+		return true
+	}
+
+	if containsAny(lower, scriptExecutionIndicators) {
+		return true
+	}
+
+	if looksLikeImmediateLocationAssign(script, lower) {
+		return true
+	}
+
+	return false
+}
+
+func looksLikeImmediateLocationAssign(script, lower string) bool {
+	if !(jsLocationAssignRe.MatchString(script) || jsBareLocationAssignRe.MatchString(script) || jsLocationFuncRe.MatchString(script)) {
+		return false
+	}
+
+	if containsAny(lower, scriptUserActionIndicators) {
+		return false
+	}
+
+	if strings.Contains(lower, "=>") {
+		return false
+	}
+
+	if strings.Contains(lower, "function") {
+		// 允许 IIFE 或显式 onload 触发器
+		hasIIFE := strings.Contains(lower, "function(){") && strings.Contains(lower, "}();")
+		hasWrappedIIFE := strings.Contains(lower, "(function") && strings.Contains(lower, "})(")
+		hasLoadHook := containsAny(lower, scriptExecutionIndicators)
+		if !(hasIIFE || hasWrappedIIFE || hasLoadHook) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func containsAny(haystack string, needles []string) bool {
+	if haystack == "" {
+		return false
+	}
+	for _, needle := range needles {
+		if needle == "" {
+			continue
+		}
+		if strings.Contains(haystack, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRedirectIndicators(body string) bool {
+	withoutScripts := scriptStripRe.ReplaceAllString(body, " ")
+	plain := htmlTagRe.ReplaceAllString(withoutScripts, " ")
+	plain = strings.ToLower(strings.TrimSpace(plain))
+
+	if plain == "" {
+		return false
+	}
+
+	runes := []rune(plain)
+	if len(runes) > maxRedirectTextRuneCount {
+		plain = string(runes[:maxRedirectTextRuneCount])
+	}
+
+	for _, indicator := range redirectTextIndicators {
+		if strings.Contains(plain, strings.ToLower(indicator)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ResolveRedirectURL 将相对/协议相对URL解析为绝对地址。
@@ -310,21 +492,9 @@ func DetectClientRedirectURL(body string) string {
 		return strings.TrimSpace(m[1])
 	}
 
-	// JavaScript redirection extraction
-	jsPatterns := []string{
-		// location = "..."
-		`(?is)(?:window\.|self\.|top\.|parent\.|)location(?:\.href)?\s*=\s*['"]([^'"]+)['"]`,
-		// location.replace("...")
-		`(?is)(?:window\.|self\.|top\.|parent\.|)location\.replace\(\s*['"]([^'"]+)['"]\s*\)`,
-		// location.assign("...")
-		`(?is)(?:window\.|self\.|top\.|parent\.|)location\.assign\(\s*['"]([^'"]+)['"]\s*\)`,
-	}
-
-	for _, pat := range jsPatterns {
-		re := regexp.MustCompile(pat)
-		if m := re.FindStringSubmatch(body); len(m) >= 2 {
-			return strings.TrimSpace(m[1])
-		}
+	// JavaScript-based redirect detection（增加准确性控制）
+	if url := detectJSRedirectURL(body); url != "" {
+		return url
 	}
 
 	// Fallback: 某些服务器直接返回文本提示 "Moved to: <a href="...">"，需要解析其中的链接

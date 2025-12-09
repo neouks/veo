@@ -2,7 +2,10 @@ package dirscan
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
+	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
 )
 
@@ -14,6 +17,7 @@ type DirscanAddon struct {
 	collector *Collector
 	enabled   bool
 	status    ScanStatus
+	depth     int // 递归扫描深度
 }
 
 // NewDirscanAddon 创建目录扫描插件
@@ -27,6 +31,7 @@ func NewDirscanAddon(config *EngineConfig) (*DirscanAddon, error) {
 		collector: collectorInstance,
 		enabled:   true,
 		status:    StatusIdle,
+		depth:     0, // 默认深度为0，可通过SetDepth方法修改
 	}
 
 	logger.Debug("目录扫描插件初始化完成")
@@ -36,7 +41,6 @@ func NewDirscanAddon(config *EngineConfig) (*DirscanAddon, error) {
 // CreateDefaultAddon 创建默认配置的目录扫描插件
 func CreateDefaultAddon() (*DirscanAddon, error) {
 	config := getDefaultConfig()
-	config.EnableReporting = false
 	return NewDirscanAddon(config)
 }
 
@@ -106,8 +110,9 @@ func (da *DirscanAddon) TriggerScan() (*ScanResult, error) {
 		return nil, fmt.Errorf("collector未初始化")
 	}
 
-	// 检查是否有收集到的URL
-	if da.collector.GetURLCount() == 0 {
+	// 获取初始收集的URL
+	collectedURLs := da.GetCollectedURLs()
+	if len(collectedURLs) == 0 {
 		return nil, fmt.Errorf("没有收集到URL，无法开始扫描")
 	}
 
@@ -118,17 +123,88 @@ func (da *DirscanAddon) TriggerScan() (*ScanResult, error) {
 	da.collector.DisableCollection()
 	defer da.collector.EnableCollection()
 
-	// 执行扫描
-	result, err := da.engine.PerformScan(da.collector)
-	if err != nil {
-		da.status = StatusError
-		return nil, err
+	// 获取配置的深度
+	depth := da.depth
+
+	// 初始化聚合结果
+	finalResult := &ScanResult{
+		StartTime:     time.Now(),
+		CollectedURLs: collectedURLs,
+		FilterResult: &interfaces.FilterResult{
+			ValidPages: make([]interfaces.HTTPResponse, 0),
+		},
+	}
+
+	currentTargets := collectedURLs
+	alreadyScanned := make(map[string]bool)
+
+	// 预先标记初始目标
+	for _, t := range currentTargets {
+		alreadyScanned[t] = true
+		if !strings.HasSuffix(t, "/") {
+			alreadyScanned[t+"/"] = true
+		}
+	}
+
+	// 递归循环
+	for d := 0; d <= depth; d++ {
+		if len(currentTargets) == 0 {
+			break
+		}
+
+		if d > 0 {
+			logger.Infof("正在进行第 %d 层递归目录扫描，目标数量: %d", d, len(currentTargets))
+		}
+
+		// 创建临时收集器
+		tempCollector := &RecursionCollector{
+			urls: make(map[string]int),
+		}
+		for _, t := range currentTargets {
+			tempCollector.urls[t] = 1
+		}
+
+		// 执行扫描
+		scanResult, err := da.engine.PerformScanWithOptions(tempCollector, d > 0)
+		if err != nil {
+			logger.Errorf("Scan failed at depth %d: %v", d, err)
+			// 继续处理部分结果
+		}
+
+		if scanResult != nil {
+			// 聚合响应
+			finalResult.Responses = append(finalResult.Responses, scanResult.Responses...)
+			finalResult.ScanURLs = append(finalResult.ScanURLs, scanResult.ScanURLs...)
+
+			// 聚合有效页面 (用于提取下一层目标和最终报告)
+			if scanResult.FilterResult != nil {
+				finalResult.FilterResult.ValidPages = append(finalResult.FilterResult.ValidPages, scanResult.FilterResult.ValidPages...)
+			}
+
+			// 更新元数据
+			finalResult.Target = scanResult.Target // 使用最后一个作为Target，或者保留初始的
+		}
+
+		// 提取下一层目标
+		if d < depth && scanResult != nil && scanResult.FilterResult != nil {
+			newTargets := ExtractNextLevelTargets(scanResult.FilterResult.ValidPages, alreadyScanned)
+
+			var validNewTargets []string
+			for _, nt := range newTargets {
+				alreadyScanned[nt] = true
+				validNewTargets = append(validNewTargets, nt)
+			}
+			currentTargets = validNewTargets
+		}
 	}
 
 	// 扫描完成后清空已采集的URL，等待下一轮采集
 	da.collector.ClearURLMap()
 
-	return result, nil
+	finalResult.EndTime = time.Now()
+	finalResult.Duration = finalResult.EndTime.Sub(finalResult.StartTime)
+
+	return finalResult, nil
 }
 
 // GetStatus 获取扫描状态
@@ -168,6 +244,11 @@ func (da *DirscanAddon) SetCollector(c *Collector) {
 // 字典预加载方法
 
 // 字典预加载逻辑已经迁移到生成器内部（无须处理）
+
+// SetDepth 设置递归扫描深度
+func (da *DirscanAddon) SetDepth(depth int) {
+	da.depth = depth
+}
 
 // Proxy.Addon接口实现
 

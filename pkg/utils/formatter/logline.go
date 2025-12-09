@@ -14,7 +14,7 @@ func FormatTitleForMatch(title string, matched bool) string {
 }
 
 // FormatLogLine 构造统一的日志输出格式：URL 状态码 标题 Content-Length Content-Type 指纹
-func FormatLogLine(url string, statusCode int, title string, contentLength int64, contentType string, fingerprints []string, matched bool) string {
+func FormatLogLine(url string, statusCode int, title string, contentLength int64, contentType string, fingerprints []string, matched bool, tags ...string) string {
 	if contentLength < 0 {
 		contentLength = 0
 	}
@@ -32,6 +32,14 @@ func FormatLogLine(url string, statusCode int, title string, contentLength int64
 		fp = "-"
 	}
 	parts = append(parts, fp)
+
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		parts = append(parts, FormatFingerprintTag(tag))
+	}
 
 	return strings.Join(parts, " ")
 }

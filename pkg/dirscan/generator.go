@@ -65,7 +65,7 @@ func NewURLGeneratorWithDependencies(
 }
 
 // GenerateURLsFromCollector 从收集器生成扫描URL
-func (ug *URLGenerator) GenerateURLsFromCollector(collector interfaces.URLCollectorInterface) []string {
+func (ug *URLGenerator) GenerateURLsFromCollector(collector interfaces.URLCollectorInterface, recursive bool) []string {
 	// 获取收集的URL
 	urlMap := collector.GetURLMap()
 	if len(urlMap) == 0 {
@@ -77,16 +77,31 @@ func (ug *URLGenerator) GenerateURLsFromCollector(collector interfaces.URLCollec
 	baseURLs := ug.convertURLMapToList(urlMap)
 
 	// 生成扫描URL
-	scanURLs := ug.GenerateURLs(baseURLs)
+	var scanURLs []string
+	if recursive {
+		scanURLs = ug.GenerateRecursiveURLs(baseURLs)
+	} else {
+		scanURLs = ug.GenerateURLs(baseURLs)
+	}
 
-	logger.Debug(fmt.Sprintf("URL生成完成: 基础URL %d 个, 生成扫描URL %d 个",
-		len(baseURLs), len(scanURLs)))
+	logger.Debug(fmt.Sprintf("URL生成完成: 基础URL %d 个, 生成扫描URL %d 个 (递归模式: %v)",
+		len(baseURLs), len(scanURLs), recursive))
 
 	return scanURLs
 }
 
 // GenerateURLs 从基础URL列表生成扫描URL（性能优化版本）
 func (ug *URLGenerator) GenerateURLs(baseURLs []string) []string {
+	return ug.generateURLsInternal(baseURLs, false)
+}
+
+// GenerateRecursiveURLs 从基础URL列表生成递归扫描URL（仅扫描当前目录，不回溯）
+func (ug *URLGenerator) GenerateRecursiveURLs(baseURLs []string) []string {
+	return ug.generateURLsInternal(baseURLs, true)
+}
+
+// generateURLsInternal 内部生成方法
+func (ug *URLGenerator) generateURLsInternal(baseURLs []string, recursive bool) []string {
 	ug.mu.Lock()
 	defer ug.mu.Unlock()
 
@@ -98,7 +113,7 @@ func (ug *URLGenerator) GenerateURLs(baseURLs []string) []string {
 	// 性能优化：移除每次的字典加载检查，依赖全局缓存
 	// 字典将在首次访问时自动加载到全局缓存
 
-	logger.Debug(fmt.Sprintf("开始生成扫描URL，基础URL数量: %d", len(baseURLs)))
+	logger.Debug(fmt.Sprintf("开始生成扫描URL，基础URL数量: %d, 递归模式: %v", len(baseURLs), recursive))
 
 	// 处理每个基础URL
 	for i, baseURL := range baseURLs {
@@ -109,7 +124,7 @@ func (ug *URLGenerator) GenerateURLs(baseURLs []string) []string {
 			continue
 		}
 
-		ug.generateURLsForBase(baseURL)
+		ug.generateURLsForBase(baseURL, recursive)
 	}
 
 	// 去重
@@ -124,7 +139,7 @@ func (ug *URLGenerator) GenerateURLs(baseURLs []string) []string {
 }
 
 // generateURLsForBase 为单个基础URL生成扫描URL
-func (ug *URLGenerator) generateURLsForBase(baseURL string) {
+func (ug *URLGenerator) generateURLsForBase(baseURL string, recursive bool) {
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
 		logger.Debug("URL解析失败: ", baseURL)
@@ -134,10 +149,14 @@ func (ug *URLGenerator) generateURLsForBase(baseURL string) {
 	components := ug.extractURLComponents(parsedURL)
 
 	// 生成根目录扫描URL
+	// 在递归模式下，这里的根目录就是传入的完整路径（例如 /actuator/）
 	ug.generateRootURLs(components)
 
 	// 生成路径层级扫描URL
-	ug.generatePathLevelURLs(components)
+	// 递归模式下跳过此步骤，避免重复扫描父级目录
+	if !recursive {
+		ug.generatePathLevelURLs(components)
+	}
 }
 
 // extractURLComponents 提取URL组件

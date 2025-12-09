@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"veo/internal/core/config"
+
 	"veo/pkg/utils/logger"
 	"veo/pkg/utils/redirect"
 	"veo/pkg/utils/useragent"
@@ -33,13 +33,14 @@ type HeaderAwareClient interface {
 
 // Config HTTP客户端配置结构
 type Config struct {
-	Timeout        time.Duration // 请求超时时间
-	FollowRedirect bool          // 是否跟随重定向
-	MaxRedirects   int           // 最大重定向次数
-	UserAgent      string        // User-Agent
-	SkipTLSVerify  bool          // 跳过TLS证书验证
-	TLSTimeout     time.Duration // TLS握手超时
-	ProxyURL       string        // 上游代理URL
+	Timeout        time.Duration     // 请求超时时间
+	FollowRedirect bool              // 是否跟随重定向
+	MaxRedirects   int               // 最大重定向次数
+	UserAgent      string            // User-Agent
+	SkipTLSVerify  bool              // 跳过TLS证书验证
+	TLSTimeout     time.Duration     // TLS握手超时
+	ProxyURL       string            // 上游代理URL
+	CustomHeaders  map[string]string // 自定义HTTP头部
 }
 
 // DefaultConfig 获取默认HTTP客户端配置（安全扫描优化版）
@@ -74,9 +75,10 @@ func DefaultConfigWithUserAgent(userAgent string) *Config {
 // 支持配置化的重定向跟随和TLS配置功能
 type Client struct {
 	client         *http.Client
-	followRedirect bool   // 是否跟随重定向
-	maxRedirects   int    // 最大重定向次数
-	userAgent      string // User-Agent
+	followRedirect bool              // 是否跟随重定向
+	maxRedirects   int               // 最大重定向次数
+	userAgent      string            // User-Agent
+	customHeaders  map[string]string // 自定义HTTP头部
 }
 
 // New 创建配置化的HTTP客户端（支持TLS）
@@ -129,6 +131,7 @@ func New(config *Config) *Client {
 		followRedirect: config.FollowRedirect,
 		maxRedirects:   config.MaxRedirects,
 		userAgent:      config.UserAgent,
+		customHeaders:  config.CustomHeaders,
 	}
 }
 
@@ -248,31 +251,26 @@ func (c *Client) setRequestHeaders(req *http.Request) {
 	// [新增] 为指纹识别添加自定义Cookie头
 	req.Header.Set("Cookie", "rememberMe=1")
 
-	// 应用全局配置中的自定义头部（如学习到的认证头部）
+	// 应用配置中的自定义头部（如学习到的认证头部）
 	c.applyCustomHeaders(req)
 }
 
-// applyCustomHeaders 应用全局配置中的自定义HTTP头部
+// applyCustomHeaders 应用配置中的自定义HTTP头部
 func (c *Client) applyCustomHeaders(req *http.Request) {
-	// 从全局配置获取自定义头部
-	customHeaders := config.GetCustomHeaders()
-
-	if len(customHeaders) > 0 {
+	if len(c.customHeaders) > 0 {
 		// 应用自定义头部到请求
-		for key, value := range customHeaders {
+		for key, value := range c.customHeaders {
 			req.Header.Set(key, value)
 		}
 
-		logger.Debugf("应用了 %d 个自定义HTTP头部: %s", len(customHeaders), req.URL.String())
+		logger.Debugf("应用了 %d 个自定义HTTP头部: %s", len(c.customHeaders), req.URL.String())
 
 		// 记录应用的头部（调试用）
-		for key, value := range customHeaders {
+		for key, value := range c.customHeaders {
 			// 对敏感信息进行遮蔽显示
 			maskedValue := c.maskSensitiveValue(value)
 			logger.Debugf("自定义头部: %s = %s", key, maskedValue)
 		}
-	} else {
-		logger.Debugf("未发现自定义HTTP头部: %s", req.URL.String())
 	}
 }
 

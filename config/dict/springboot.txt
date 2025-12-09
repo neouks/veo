@@ -51,10 +51,10 @@
 /actuator/status
 /actuator/threaddump
 /actuator/trace
-/..;/..;/gateway/actuator
+/..;/..;/gateway;%0A/actuator
 /..;/..;/gateway/actuator/
 /gateway/actuator/auditevents/list
-/gateway/actuator/beans
+/gateway;%0A/actuator/beans
 /gateway/actuator/conditions
 /gateway/actuator/configprops
 /gateway/actuator/env
@@ -89,8 +89,8 @@
 /..;/..;/gateway/actuator/swagger-ui.html
 /..;/..;/gateway/actuator/threaddump
 /..;/..;/gateway/actuator/trace
-/actuator/gateway
-/actuator/gateway/routes
+/actuator;%0A/gateway
+/actuator;%0A/gateway/routes
 /gateway
 /routes
 /actuator/info;
@@ -99,8 +99,10 @@
 /api/actuator/
 /login/..;/actuator/info;
 /swagger-resources
+/api/v2;%0A/api-docs
 /api/v2/api-docs
 /v2/api-docs
+/v2;%0A/api-docs
 /api-docs
 /login/..;/actuator/nacos;
 /#/wallboard
@@ -143,7 +145,7 @@
 /actuator/env/spring.jmx.enabled
 /actuator/env/system
 /actuator/features/actuator/peripheral/swagger-ui.html
-/actuator/h2-console
+/actuator;%0A/h2-console
 /actuator/health/
 /actuator/health/actuator/loggers
 /actuator/heapdump
@@ -214,7 +216,7 @@
 /api/swagger/
 /api/swagger/ui
 /api/swaggerui
-/api/v1/
+/api/v1;%0A/
 /api/v1/api-docs
 /api/v1/apidocs
 /api/v1/login
@@ -225,6 +227,7 @@
 /api/v1/swagger-ui.json
 /api/v1/swagger.json
 /api/v1/swagger/
+/api;%0A/v2
 /api/v2
 /api/v2/apidocs
 /api/v2/login
@@ -274,7 +277,7 @@
 /dump
 /env
 /env/
-/env/(name)
+/env;%0A/
 /env/java.home
 /env/spring
 /env/spring.jmx.enabled
@@ -501,3 +504,5 @@
 /actuator/./heapdump
 /./actuator/
 /./actuator
+/prod-api/actuator
+/prod-api;%0A/actuator

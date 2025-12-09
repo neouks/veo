@@ -23,6 +23,7 @@ type TargetScheduler struct {
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	baseRequestProcessor   *processor.RequestProcessor // 基础请求处理器（支持统计更新）
+	recursive              bool                        // 是否递归模式
 }
 
 // TargetWorker 目标工作器
@@ -32,6 +33,7 @@ type TargetWorker struct {
 	urlGenerator     *dirscan.URLGenerator
 	requestProcessor *processor.RequestProcessor
 	ctx              context.Context
+	recursive        bool
 }
 
 // TargetResult 目标扫描结果
@@ -59,6 +61,11 @@ func NewTargetScheduler(targets []string, cfg *config.Config) *TargetScheduler {
 		cancel:                 cancel,
 		baseRequestProcessor:   nil, // 初始化为nil，需要外部设置
 	}
+}
+
+// SetRecursive 设置是否递归模式
+func (ts *TargetScheduler) SetRecursive(recursive bool) {
+	ts.recursive = recursive
 }
 
 // SetBaseRequestProcessor 设置基础请求处理器（支持统计更新）
@@ -270,6 +277,7 @@ func (ts *TargetScheduler) createTargetWorker(id int, target string) *TargetWork
 		urlGenerator:     dirscan.NewURLGenerator(),
 		requestProcessor: requestProcessor,
 		ctx:              ts.ctx,
+		recursive:        ts.recursive,
 	}
 }
 
@@ -290,6 +298,11 @@ func (ts *TargetScheduler) copyStatsUpdater(source, target *processor.RequestPro
 
 // generateScanURLs 生成扫描URL
 func (tw *TargetWorker) generateScanURLs() []string {
+	if tw.recursive {
+		// 递归模式：只扫描当前目录层级，不回溯父目录
+		return tw.urlGenerator.GenerateRecursiveURLs([]string{tw.target})
+	}
+	// 默认模式：扫描所有层级
 	return tw.urlGenerator.GenerateURLs([]string{tw.target})
 }
 

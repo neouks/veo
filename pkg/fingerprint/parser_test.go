@@ -1,7 +1,6 @@
 package fingerprint
 
 import (
-	"net/http"
 	"testing"
 	"veo/pkg/types"
 )
@@ -58,9 +57,22 @@ func TestEvaluateContainsAll(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			headers := make(map[string][]string)
+			if tt.headers != nil {
+				headers = make(map[string][]string, len(tt.headers))
+				for k, v := range tt.headers {
+					if len(v) == 0 {
+						continue
+					}
+					dup := make([]string, len(v))
+					copy(dup, v)
+					headers[k] = dup
+				}
+			}
+
 			ctx := &DSLContext{
 				Body:    tt.body,
-				Headers: http.Header(tt.headers),
+				Headers: headers,
 				Response: &types.HTTPResponse{
 					Title:  "Test Title",
 					Server: "Test Server",
@@ -73,10 +85,5 @@ func TestEvaluateContainsAll(t *testing.T) {
 		})
 	}
 }
-
-
-
-
-
 
 

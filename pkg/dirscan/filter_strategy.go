@@ -429,58 +429,6 @@ func (sf *SecondaryFilter) GetSecondaryHashCount() int {
 }
 
 // ============================================================================
-// 过滤链 (原interfaces.go中的FilterChain)
-// ============================================================================
-
-// FilterChain 过滤链，用于组合多个过滤策略
-type FilterChain struct {
-	strategies []FilterStrategy
-}
-
-// NewFilterChain 创建过滤链
-func NewFilterChain() *FilterChain {
-	return &FilterChain{
-		strategies: make([]FilterStrategy, 0),
-	}
-}
-
-// AddStrategy 添加过滤策略
-func (fc *FilterChain) AddStrategy(strategy FilterStrategy) {
-	fc.strategies = append(fc.strategies, strategy)
-}
-
-// Filter 执行过滤链
-func (fc *FilterChain) Filter(responses []interfaces.HTTPResponse) []interfaces.HTTPResponse {
-	result := responses
-
-	// 按顺序执行每个过滤策略
-	for _, strategy := range fc.strategies {
-		result = strategy.Filter(result)
-	}
-
-	return result
-}
-
-// Reset 重置所有过滤策略
-func (fc *FilterChain) Reset() {
-	for _, strategy := range fc.strategies {
-		strategy.Reset()
-	}
-}
-
-// GetStrategies 获取所有策略（只读）
-func (fc *FilterChain) GetStrategies() []FilterStrategy {
-	result := make([]FilterStrategy, len(fc.strategies))
-	copy(result, fc.strategies)
-	return result
-}
-
-// ClearStrategies 清空所有策略
-func (fc *FilterChain) ClearStrategies() {
-	fc.strategies = make([]FilterStrategy, 0)
-}
-
-// ============================================================================
 // Content-Type过滤器
 // ============================================================================
 
@@ -557,26 +505,5 @@ func (ctf *ContentTypeFilter) IsContentTypeFiltered(contentType string) bool {
 	ctf.mu.RLock()
 	defer ctf.mu.RUnlock()
 
-	if contentType == "" || contentType == "unknown" {
-		return false // 不过滤未知类型
-	}
-
-	// 清理Content-Type，移除参数部分（如charset等）
-	cleanContentType := strings.ToLower(strings.TrimSpace(contentType))
-	if idx := strings.Index(cleanContentType, ";"); idx != -1 {
-		cleanContentType = cleanContentType[:idx]
-	}
-
-	// 检查是否在过滤列表中
-	for _, filtered := range ctf.filteredContentTypes {
-		if cleanContentType == strings.ToLower(filtered) {
-			return true
-		}
-		// 支持前缀匹配（如image/开头的所有类型）
-		if strings.HasSuffix(filtered, "/") && strings.HasPrefix(cleanContentType, strings.ToLower(filtered)) {
-			return true
-		}
-	}
-
-	return false
+	return checkContentTypeAgainstRules(contentType, ctf.filteredContentTypes)
 }

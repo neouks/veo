@@ -17,9 +17,11 @@ import (
 	"veo/pkg/core/console"
 	modulepkg "veo/pkg/core/module"
 	"veo/pkg/dirscan"
+	"veo/pkg/fingerprint"
 	fpaddon "veo/pkg/fingerprint"
 	"veo/pkg/utils/formatter"
 	"veo/pkg/utils/httpclient"
+	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
 	"veo/pkg/utils/processor/auth"
 	"veo/proxy"
@@ -74,11 +76,17 @@ type CLIArgs struct {
 	// 新增：状态码过滤参数
 	StatusCodes string // 自定义过滤HTTP状态码 (-s "200,301,302")
 
-	// 新增：相似页面过滤容错阈值参数
-	FilterTolerance int // 相似页面过滤容错阈值 (--filter-tolerance)
+	// 新增：完全禁用hash过滤参数
+	DisableHashFilter bool // 禁用哈希过滤 (--no-filter)
 
 	// 新增：随机User-Agent控制
 	RandomUA bool // 是否启用随机User-Agent (-ua, 默认启用)
+
+	// 新增：递归目录扫描深度
+	Depth int // 递归目录扫描层级 (--depth)
+
+	// 新增：指纹库更新参数
+	UpdateRules bool // 更新指纹识别规则库 (--update-rules)
 }
 
 // ValidModules 有效的模块列表（使用module包的类型定义）
@@ -129,6 +137,9 @@ func Execute() {
 
 	// 应用CLI参数到配置（包括--debug标志）
 	applyArgsToConfig(args)
+
+	// 处理指纹库更新逻辑 (前置处理，如果是更新操作则直接退出)
+	handleRuleUpdates(args)
 
 	//  提前显示启动信息，确保banner在所有日志输出之前显示
 	displayStartupInfo(args)
@@ -189,11 +200,12 @@ func ParseCLIArgs() *CLIArgs {
 		// 新增：状态码过滤参数
 		statusCodes = flag.String("s", "", "指定需要保留的HTTP状态码，逗号分隔 (例如: -s 200,301,302)")
 
-		// 新增：相似页面过滤容错阈值参数（-1表示使用默认值）
-		filterTolerance = flag.Int("filter", -1, "相似页面过滤容错阈值(字节)，值越大过滤越严格 (默认: 50, 范围: 0-500, 0表示禁用过滤)")
+		noFilter = flag.Bool("no-filter", false, "完全禁用目录扫描哈希过滤（默认开启）")
 
 		// 新增：随机User-Agent控制
 		randomUAFlag = flag.Bool("ua", true, "是否启用随机User-Agent池 (默认: true，可通过 -ua=false 关闭)")
+		depth        = flag.Int("depth", 0, "递归目录扫描深度 (0 表示关闭递归，默认: 0)")
+		updateRules  = flag.Bool("update-rules", false, "从云端更新指纹识别规则库")
 
 		help     = flag.Bool("h", false, "显示帮助信息")
 		helpLong = flag.Bool("help", false, "显示帮助信息")
@@ -239,13 +251,17 @@ func ParseCLIArgs() *CLIArgs {
 		Headers: []string(headers),
 
 		// 新增：状态码过滤参数
-		StatusCodes: *statusCodes,
-
-		// 新增：相似页面过滤容错阈值参数
-		FilterTolerance: *filterTolerance,
+		StatusCodes:       *statusCodes,
+		DisableHashFilter: *noFilter,
 
 		// 新增：随机User-Agent控制
 		RandomUA: *randomUAFlag,
+
+		// 递归目录扫描深度
+		Depth: *depth,
+
+		// 指纹库更新
+		UpdateRules: *updateRules,
 	}
 
 	if *targetsStr != "" {
@@ -400,11 +416,6 @@ func validateArgs(args *CLIArgs) error {
 		return fmt.Errorf("超时时间必须在0-300秒范围内，当前值: %d", args.Timeout)
 	}
 
-	// 验证相似页面过滤容错阈值（-1表示使用默认值，不需要验证）
-	if args.FilterTolerance != -1 && (args.FilterTolerance < 0 || args.FilterTolerance > 500) {
-		return fmt.Errorf("相似页面过滤容错阈值必须在0-500范围内，当前值: %d", args.FilterTolerance)
-	}
-
 	// 根据模式验证参数
 	if args.Listen {
 		// 被动代理模式：如果没有指定目标，设置默认值为 * (全部抓取)
@@ -412,8 +423,8 @@ func validateArgs(args *CLIArgs) error {
 			args.Targets = []string{"*"}
 		}
 	} else {
-		// 主动扫描模式：必须指定具体目标或目标文件
-		if len(args.Targets) == 0 && args.TargetFile == "" {
+		// 主动扫描模式：必须指定具体目标或目标文件（除非是更新规则模式）
+		if !args.UpdateRules && len(args.Targets) == 0 && args.TargetFile == "" {
 			return fmt.Errorf("主动扫描模式必须指定目标主机/URL (-u) 或目标文件 (-l)")
 		}
 		// 主动模式不允许使用通配符
@@ -425,8 +436,10 @@ func validateArgs(args *CLIArgs) error {
 	}
 
 	// 验证目标格式
-	if err := validateTargets(args.Targets); err != nil {
-		return fmt.Errorf("目标参数无效: %v", err)
+	if !args.UpdateRules {
+		if err := validateTargets(args.Targets); err != nil {
+			return fmt.Errorf("目标参数无效: %v", err)
+		}
 	}
 
 	// 验证自定义字典文件（如果指定）
@@ -698,6 +711,10 @@ func applyArgsToConfig(args *CLIArgs) {
 
 		randomUA := args.RandomUA
 		requestConfig.RandomUA = &randomUA
+
+		// 设置递归深度
+		requestConfig.Depth = args.Depth
+		logger.Debugf("全局配置：递归目录扫描深度设置为 %d", requestConfig.Depth)
 	}
 
 	// 处理HTTP认证头部参数
@@ -736,12 +753,12 @@ func applyArgsToConfig(args *CLIArgs) {
 		}
 	}
 
-	if args.FilterTolerance != -1 {
+	if args.DisableHashFilter {
 		if customFilterConfig == nil {
 			customFilterConfig = dirscan.DefaultFilterConfig()
 		}
-		customFilterConfig.FilterTolerance = int64(args.FilterTolerance)
-		logger.Debugf("CLI参数覆盖：相似页面过滤容错阈值设置为 %d 字节", args.FilterTolerance)
+		customFilterConfig.DisableHashFilter = true
+		logger.Warn("CLI参数：已禁用目录扫描哈希过滤 (--no-filter)")
 	}
 
 	if customFilterConfig != nil {
@@ -771,10 +788,39 @@ func applyArgsToConfig(args *CLIArgs) {
 	if args.Proxy != "" {
 		proxyConfig := config.GetProxyConfig()
 		proxyConfig.UpstreamProxy = args.Proxy
-		logger.Infof("上游代理已设置: %s", args.Proxy)
+		logger.Infof("UpstreamProxy: %s", args.Proxy)
 	}
 
 	// 应用输出文件路径
+}
+
+// handleRuleUpdates 处理指纹库更新逻辑
+func handleRuleUpdates(args *CLIArgs) {
+	updater := fpaddon.NewUpdater("config/fingerprint/finger.yaml")
+
+	if args.UpdateRules {
+		logger.Info("正在检查并更新指纹识别规则库...")
+		if err := updater.UpdateRules(); err != nil {
+			logger.Fatalf("指纹库更新失败: %v", err)
+		}
+		logger.Info("指纹库更新完成")
+		os.Exit(0)
+	}
+
+	// 检查更新 (同步执行，确保在扫描前提示)
+	// 使用短超时 (3s) 避免阻塞过久
+	hasUpdate, localVer, remoteVer, err := updater.CheckForUpdates()
+	if err != nil {
+		logger.Debugf("检查指纹库更新失败: %v", err)
+		return
+	}
+
+	if hasUpdate {
+		msg := fmt.Sprintf("发现新的指纹库版本: %s (当前: %s)，请运行 --update-rules 进行更新", remoteVer, localVer)
+		logger.Info(msg)
+	} else {
+		logger.Debugf("指纹库已是最新版本: %s", localVer)
+	}
 }
 
 // createProxy 创建代理服务器
@@ -1081,6 +1127,57 @@ func (app *CLIApp) triggerScan() {
 	if app.fingerprintAddon != nil {
 		app.fingerprintAddon.Enable()
 		logger.Debug("指纹识别插件已恢复")
+	}
+
+	// 报告生成逻辑 (集成到被动扫描)
+	// 如果指定了 -o 输出路径，则在扫描结束后生成报告
+	if app.args.Output != "" {
+		// 收集扫描参数 (模拟)
+		scanParams := map[string]interface{}{
+			"threads":                   0, // 被动模式此项可能不准确
+			"timeout":                   0,
+			"retry":                     0,
+			"dir_targets_count":         len(result.ScanURLs),
+			"fingerprint_targets_count": 0,
+			"fingerprint_rules_loaded":  0,
+		}
+
+		// 获取指纹引擎
+		var fpEngine *fingerprint.Engine
+		if app.fingerprintAddon != nil {
+			fpEngine = app.fingerprintAddon.GetEngine()
+			if fpEngine != nil {
+				stats := fpEngine.GetStats()
+				scanParams["fingerprint_rules_loaded"] = stats.RulesLoaded
+			}
+		}
+
+		// 构造配置
+		reportConfig := &ReportConfig{
+			Modules:                app.args.Modules,
+			OutputPath:             app.args.Output,
+			ShowFingerprintSnippet: app.args.VeryVerbose,
+			ScanParams:             scanParams,
+		}
+
+		// 准备数据
+		// dirscan结果来自 TriggerScan 返回值
+		// finger结果目前需要从 FingerprintEngine 获取所有匹配项 (因为是被动实时匹配的)
+		// 注意：这可能包含非本次扫描周期的指纹，但在被动模式下，报告通常反映当前会话的所有发现
+		// 更好的做法可能是让 FingerprintAddon 支持 Session 级别的匹配收集，但目前先使用全局匹配
+		var dirResults, fingerResults []interfaces.HTTPResponse
+		dirResults = result.FilterResult.ValidPages
+
+		// 如果没有明确的 FingerprintResults 结构，我们通过 filterResult.ValidPages 来获取
+		// 但对于 JSON 报告，我们需要独立的 fingerResults 列表
+		// 目前被动模式没有维护独立的 fingerResults 列表，我们暂时留空，或者尝试从 ValidPages 中提取（如果它们包含指纹）
+		// 为了简单起见，我们假定指纹信息主要通过 Matches 列表 (JSON) 或 ValidPages.Fingerprints (Excel) 体现
+
+		// 调用统一的报告生成函数
+		err := GenerateReport(reportConfig, dirResults, fingerResults, result.FilterResult, fpEngine)
+		if err != nil {
+			logger.Errorf("报告生成失败: %v", err)
+		}
 	}
 
 	logger.Info("等待下一轮收集，按 [Enter] 键再次扫描...")

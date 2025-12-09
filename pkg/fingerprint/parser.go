@@ -1,7 +1,6 @@
 package fingerprint
 
 import (
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -238,6 +237,12 @@ func (p *DSLParser) evaluateIcon(dsl string, ctx *DSLContext) (bool, bool) {
 			// 构造完整的图标URL
 			iconURL := ctx.BaseURL + iconPath
 
+			// 先检查匹配结果缓存，避免重复比较
+			if cachedMatch, exists := ctx.Engine.getIconMatchCache(iconURL, expectedHash); exists {
+				logger.Debugf("icon()匹配缓存命中: %s (%s) -> %v", iconURL, expectedHash, cachedMatch)
+				return cachedMatch, true
+			}
+
 			// 使用Engine的缓存机制获取图标哈希值
 			actualHash, err := ctx.Engine.getIconHash(iconURL, ctx.HTTPClient)
 			if err != nil {
@@ -247,6 +252,7 @@ func (p *DSLParser) evaluateIcon(dsl string, ctx *DSLContext) (bool, bool) {
 
 			// 比较哈希值
 			match := actualHash == expectedHash
+			ctx.Engine.setIconMatchCache(iconURL, expectedHash, match)
 			logger.Debugf("icon()匹配: %s -> %v", iconURL, match)
 			return match, true
 		}
@@ -290,12 +296,21 @@ func (p *DSLParser) evaluateHeader(dsl string, ctx *DSLContext) (bool, bool) {
 				headerValue = p.cleanQuotes(strings.TrimSpace(parts[1]))
 			}
 
-			if values := ctx.Headers.Get(headerName); values != "" {
-				if headerValue == "" {
-					return true, true // 只检查header是否存在
-				}
-				return strings.Contains(strings.ToLower(values), strings.ToLower(headerValue)), true
+			values := p.getHeaderValues(ctx.Headers, headerName)
+			if len(values) == 0 {
+				return false, true
 			}
+			if headerValue == "" {
+				return true, true // 只检查header是否存在
+			}
+
+			expected := strings.ToLower(headerValue)
+			for _, v := range values {
+				if strings.Contains(strings.ToLower(v), expected) {
+					return true, true
+				}
+			}
+			return false, true
 		}
 	}
 	return false, false
@@ -556,7 +571,10 @@ func normalizeSnippet(snippet string) string {
 }
 
 // headersToString 将headers转换为字符串
-func (p *DSLParser) headersToString(headers http.Header) string {
+func (p *DSLParser) headersToString(headers map[string][]string) string {
+	if len(headers) == 0 {
+		return ""
+	}
 	var sb strings.Builder
 	for name, values := range headers {
 		for _, value := range values {
@@ -567,6 +585,19 @@ func (p *DSLParser) headersToString(headers http.Header) string {
 		}
 	}
 	return sb.String()
+}
+
+func (p *DSLParser) getHeaderValues(headers map[string][]string, name string) []string {
+	if len(headers) == 0 {
+		return nil
+	}
+	target := strings.ToLower(strings.TrimSpace(name))
+	for k, values := range headers {
+		if strings.ToLower(k) == target {
+			return values
+		}
+	}
+	return nil
 }
 
 // compareNumbers 比较数字

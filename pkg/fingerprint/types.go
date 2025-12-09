@@ -2,7 +2,6 @@ package fingerprint
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -55,12 +54,15 @@ type Engine struct {
 	outputMutex              sync.RWMutex                // 输出缓存的读写锁
 	iconCache                map[string]string           // 图标缓存：URL->MD5哈希值
 	iconMutex                sync.RWMutex                // 图标缓存的读写锁
+	iconMatchCache           map[string]bool             // icon() 比较缓存：URL+Hash -> 匹配结果
+	iconMatchMutex           sync.RWMutex
 	staticExtensions         []string
 	staticContentTypes       []string
 	staticFileFilterEnabled  bool
 	contentTypeFilterEnabled bool
 	showSnippet              bool
 	showRules                bool
+	consoleSnippetEnabled    bool // 控制是否在控制台输出指纹匹配片段
 	loadedSummaries          []string // 已加载规则文件摘要，例如 finger.yaml:754
 }
 
@@ -171,7 +173,7 @@ type Statistics struct {
 // DSLContext DSL表达式上下文（增强版，支持主动探测）
 type DSLContext struct {
 	Response   *HTTPResponse
-	Headers    http.Header
+	Headers    map[string][]string
 	Body       string
 	URL        string
 	Method     string

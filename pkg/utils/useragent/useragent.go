@@ -2,10 +2,8 @@ package useragent
 
 import (
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
-	"veo/internal/core/config"
 )
 
 var (
@@ -31,39 +29,13 @@ func DefaultList() []string {
 	return result
 }
 
-// GetConfiguredList 返回配置文件中定义的User-Agent列表（已清理空白）
-func GetConfiguredList() []string {
-	cfg := resolveRequestConfig()
-	if cfg == nil || len(cfg.UserAgents) == 0 {
-		return nil
-	}
-
-	result := make([]string, 0, len(cfg.UserAgents))
-	for _, ua := range cfg.UserAgents {
-		clean := strings.TrimSpace(ua)
-		if clean != "" {
-			result = append(result, clean)
-		}
-	}
-
-	return result
-}
-
-// GetEffectiveList 返回有效的User-Agent列表（优先使用配置）
+// GetEffectiveList 返回有效的User-Agent列表（目前仅返回默认列表，可扩展为支持传入自定义列表）
 func GetEffectiveList() []string {
-	configured := GetConfiguredList()
-	if len(configured) > 0 {
-		return configured
-	}
 	return DefaultList()
 }
 
-// IsRandomEnabled 判断是否启用随机User-Agent
+// IsRandomEnabled 判断是否启用随机User-Agent (默认启用，可扩展配置)
 func IsRandomEnabled() bool {
-	cfg := resolveRequestConfig()
-	if cfg != nil && cfg.RandomUA != nil {
-		return *cfg.RandomUA
-	}
 	return true
 }
 
@@ -91,15 +63,3 @@ func Pick() string {
 	return list[idx]
 }
 
-func resolveRequestConfig() *config.RequestConfig {
-	if config.GlobalConfig != nil {
-		return &config.GlobalConfig.Addon.Request
-	}
-	if err := config.InitConfig(); err != nil {
-		return nil
-	}
-	if config.GlobalConfig == nil {
-		return nil
-	}
-	return &config.GlobalConfig.Addon.Request
-}

@@ -17,13 +17,15 @@ GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unkno
 BUILD_TIME := $(shell date +"%Y-%m-%d_%H:%M:%S")
 
 # 编译标志
-LDFLAGS := -s -w
+LDFLAGS := -s -w -buildid=
 LDFLAGS += -X main.version=$(VERSION)
 LDFLAGS += -X main.buildTime=$(BUILD_TIME)
 LDFLAGS += -X main.gitCommit=$(GIT_COMMIT)
 LDFLAGS += -X main.gitBranch=$(GIT_BRANCH)
 
 BUILDFLAGS := -trimpath
+GCFLAGS := all=-dwarf=false
+ASMFLAGS := all=-trimpath=$(CURDIR)
 CGO_ENABLED := 0
 
 # 支持的平台
@@ -117,7 +119,7 @@ check: ## 检查代码
 build: deps ## 编译当前平台
 	@echo "$(BLUE)[BUILD]$(RESET) 编译当前平台..."
 	@mkdir -p $(BUILD_DIR)
-	@CGO_ENABLED=$(CGO_ENABLED) go build $(BUILDFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME) $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME) $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) 编译完成: $(BUILD_DIR)/$(PROJECT_NAME)"
 
 .PHONY: build-all
@@ -129,22 +131,22 @@ build-all: ## 编译所有平台
 build-windows: ## 编译 Windows 平台
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Windows 平台..."
 	@mkdir -p $(BUILD_DIR)
-	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=amd64 go build $(BUILDFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_windows_amd64.exe $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=amd64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_windows_amd64.exe $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Windows 编译完成"
 
 .PHONY: build-linux
 build-linux: ## 编译 Linux 平台
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Linux 平台..."
 	@mkdir -p $(BUILD_DIR)
-	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 go build $(BUILDFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_linux_amd64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_linux_amd64 $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Linux 编译完成"
 
 .PHONY: build-darwin
 build-darwin: ## 编译 macOS 平台
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 macOS 平台..."
 	@mkdir -p $(BUILD_DIR)
-	@CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=amd64 go build $(BUILDFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_darwin_amd64 $(MAIN_FILE)
-	@CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=arm64 go build $(BUILDFLAGS) -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_darwin_arm64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=amd64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_darwin_amd64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=darwin GOARCH=arm64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_darwin_arm64 $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) macOS 编译完成"
 
 # ============================================================================
