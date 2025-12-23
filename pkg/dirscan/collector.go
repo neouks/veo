@@ -2,7 +2,6 @@ package dirscan
 
 import (
 	"net/url"
-	"strings"
 	"sync"
 
 	"veo/pkg/utils/logger"
@@ -41,39 +40,34 @@ func (c *Collector) Requestheaders(f *proxy.Flow) {
 		return
 	}
 
-	originalURL := f.Request.URL.String()
-	host := f.Request.URL.Host
-	
-	// 提取主机并检查
-	hostToCheck := host
-	if strings.HasPrefix(originalURL, "//") {
-		// 简单修复用于提取主机，完整修复在Cleaner中
-		if u, err := url.Parse("http:" + originalURL); err == nil {
-			hostToCheck = u.Host
-		}
+	rawURL := f.Request.URL.String()
+	if rawURL == "" {
+		return
 	}
-	
+
+	hostToCheck := c.getHostForCheck(rawURL, f.Request.URL.Host)
 	if !c.isHostAllowed(hostToCheck) {
 		return
 	}
 
 	// 静态资源过滤
-	if c.cleaner.IsStaticResource(originalURL) {
+	if c.cleaner.IsStaticResource(rawURL) {
 		return
 	}
 
 	// URL清理
-	cleanedURL := c.cleaner.CleanURLParams(originalURL)
+	cleanedURL := c.cleaner.CleanURLParams(rawURL)
 	if cleanedURL == "" {
 		return
 	}
 
 	c.mu.Lock()
-	if !c.pendingURLs[cleanedURL] {
-		c.pendingURLs[cleanedURL] = true
-		logger.Debugf("暂存URL: %s", cleanedURL)
+	defer c.mu.Unlock()
+	if c.pendingURLs[cleanedURL] {
+		return
 	}
-	c.mu.Unlock()
+	c.pendingURLs[cleanedURL] = true
+	logger.Debugf("暂存URL: %s", cleanedURL)
 }
 
 // Responseheaders 处理响应头
@@ -82,10 +76,10 @@ func (c *Collector) Responseheaders(f *proxy.Flow) {
 		return
 	}
 
-	originalURL := f.Request.URL.String()
+	rawURL := f.Request.URL.String()
 	statusCode := f.Response.StatusCode
-	
-	cleanedURL := c.cleaner.CleanURLParams(originalURL)
+
+	cleanedURL := c.cleaner.CleanURLParams(rawURL)
 	if cleanedURL == "" {
 		return
 	}
@@ -97,25 +91,24 @@ func (c *Collector) Responseheaders(f *proxy.Flow) {
 	if !c.pendingURLs[cleanedURL] {
 		return
 	}
-	
-	// 移除待处理状态
+
 	delete(c.pendingURLs, cleanedURL)
 
 	// 检查状态码
 	isValidCode := false
 	for _, code := range c.includeStatusCodes {
 		if code == statusCode {
-			isValidCode = true; break
+			isValidCode = true
+			break
 		}
 	}
+	if !isValidCode {
+		return
+	}
 
-	if isValidCode {
-		if _, exists := c.urlMap[cleanedURL]; !exists {
-			c.urlMap[cleanedURL] = 1
-			logger.Infof("Record URL: [ %s ]", cleanedURL)
-		} else {
-			c.urlMap[cleanedURL]++
-		}
+	c.urlMap[cleanedURL]++
+	if c.urlMap[cleanedURL] == 1 {
+		logger.Infof("Record URL: [ %s ]", cleanedURL)
 	}
 }
 
@@ -141,10 +134,20 @@ func (c *Collector) ClearURLMap() {
 }
 
 // 代理配置设置
-func (c *Collector) SetIncludeStatusCodes(codes []int) { c.includeStatusCodes = codes }
+func (c *Collector) SetIncludeStatusCodes(codes []int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.includeStatusCodes = codes
+}
+
 func (c *Collector) SetStaticExtensions(exts []string) { c.cleaner.SetStaticExtensions(exts) }
 func (c *Collector) SetStaticPaths(paths []string) { c.cleaner.SetStaticPaths(paths) }
-func (c *Collector) SetAllowedHosts(hosts []string) { c.allowedHosts = hosts }
+
+func (c *Collector) SetAllowedHosts(hosts []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.allowedHosts = hosts
+}
 
 func (c *Collector) EnableCollection() { 
 	c.mu.Lock(); defer c.mu.Unlock(); c.collectionEnabled = true 
@@ -167,12 +170,35 @@ func (c *Collector) IsCollectionPaused() bool {
 
 // isHostAllowed 简单主机检查
 func (c *Collector) isHostAllowed(host string) bool {
-	if len(c.allowedHosts) == 0 { return true }
+	c.mu.RLock()
+	hosts := c.allowedHosts
+	c.mu.RUnlock()
+
+	if len(hosts) == 0 {
+		return true
+	}
 	// 这里为了KISS，只做简单匹配。如果需要通配符，应该在allowedHosts设置时就解析好正则
-	for _, h := range c.allowedHosts {
-		if h == host { return true }
+	for _, h := range hosts {
+		if h == host {
+			return true
+		}
 	}
 	return false
+}
+
+func (c *Collector) getHostForCheck(rawURL, fallback string) string {
+	if fallback != "" {
+		return fallback
+	}
+
+	// 兜底：处理协议相对URL等情况
+	if ok, fixed := c.cleaner.validateAndFixURL(rawURL); ok {
+		if u, err := url.Parse(fixed); err == nil {
+			return u.Host
+		}
+	}
+
+	return ""
 }
 
 // 为了兼容测试

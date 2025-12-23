@@ -172,23 +172,15 @@ func (rp *RequestProcessor) ProcessURLs(urls []string) []*interfaces.HTTPRespons
 	responses := make([]*interfaces.HTTPResponse, 0, len(urls))
 	var responsesMu sync.Mutex
 
-	// 创建进度完成信号通道
-	progressDone := make(chan struct{})
-
 	// 并发优化：使用 semaphore 模式直接处理
 	rp.processURLsConcurrent(urls, &responses, &responsesMu, stats, nil)
 
 	// 完成处理
-	rp.finalizeProcessing(progressDone, stats, len(responses))
+	rp.finalizeProcessing(stats)
 
 	return responses
 }
 
-// processConcurrentURLs 并发处理URL列表（真正的并发控制）
-// Deprecated: Internal use only, merged into processURLsConcurrent
-func (rp *RequestProcessor) processConcurrentURLs(urls []string, responses *[]*interfaces.HTTPResponse, responsesMu *sync.Mutex, stats *ProcessingStats) {
-	rp.processURLsConcurrent(urls, responses, responsesMu, stats, nil)
-}
 
 // ProcessURLsWithCallback 处理URL列表，并对每个响应执行回调
 func (rp *RequestProcessor) ProcessURLsWithCallback(urls []string, callback func(*interfaces.HTTPResponse)) []*interfaces.HTTPResponse {
@@ -208,14 +200,11 @@ func (rp *RequestProcessor) ProcessURLsWithCallback(urls []string, callback func
 	responses := make([]*interfaces.HTTPResponse, 0, len(urls))
 	var responsesMu sync.Mutex
 
-	// 创建进度完成信号通道
-	progressDone := make(chan struct{})
-
 	// 使用 semaphore 模式直接处理
 	rp.processURLsConcurrent(urls, &responses, &responsesMu, stats, callback)
 
 	// 完成处理
-	rp.finalizeProcessing(progressDone, stats, len(responses))
+	rp.finalizeProcessing(stats)
 
 	return responses
 }
@@ -226,11 +215,11 @@ func (rp *RequestProcessor) processURLsConcurrent(urls []string, responses *[]*i
 	// 使用带缓冲的channel控制并发数
 	sem := make(chan struct{}, rp.config.MaxConcurrent)
 
-	for i, url := range urls {
+	for _, targetURL := range urls {
 		wg.Add(1)
-		go func(index int, targetURL string) {
+		go func(targetURL string) {
 			defer wg.Done()
-			
+
 			// 获取信号量（阻塞直到有空位）
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -250,7 +239,7 @@ func (rp *RequestProcessor) processURLsConcurrent(urls []string, responses *[]*i
 			if callback != nil && response != nil {
 				callback(response)
 			}
-		}(i, url)
+		}(targetURL)
 	}
 
 	wg.Wait()
@@ -261,9 +250,6 @@ func (rp *RequestProcessor) processURL(url string) *interfaces.HTTPResponse {
 	var response *interfaces.HTTPResponse
 	var err error
 	
-	// 确保client配置同步（虽然SetRedirectSameHostOnly会同步，但为了保险起见）
-	// 注意：这里读取可能会有竞态，但rp.client内部也是并发安全的
-	rp.client.SetSameHostOnly(rp.IsRedirectSameHostOnly())
 
 	// 改进的重试逻辑（指数退避 + 抖动）
 	for attempt := 0; attempt <= rp.config.MaxRetries; attempt++ {
@@ -575,16 +561,4 @@ func (rp *RequestProcessor) MakeRequestWithHeaders(rawURL string, headers map[st
 		return "", 0, fmt.Errorf("empty response")
 	}
 	return resp.ResponseBody, resp.StatusCode, nil
-}
-
-// MakeRequestFull 实现 redirect.HTTPFetcherFull 接口
-func (rp *RequestProcessor) MakeRequestFull(rawURL string) (string, int, map[string][]string, error) {
-	resp, err := rp.DoRequest(rawURL, nil)
-	if err != nil {
-		return "", 0, nil, err
-	}
-	if resp == nil {
-		return "", 0, nil, fmt.Errorf("empty response")
-	}
-	return resp.Body, resp.StatusCode, resp.ResponseHeaders, nil
 }

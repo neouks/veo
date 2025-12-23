@@ -1,8 +1,6 @@
 package fingerprint
 
 import (
-	"fmt"
-	"net/url"
 	"sync/atomic"
 	"time"
 
@@ -66,13 +64,7 @@ func (e *Engine) AnalyzeResponseWithClient(response *HTTPResponse, httpClient ht
 
 // AnalyzeResponseWithClientSilent 分析响应包并进行指纹识别（静默版本，不自动输出结果）
 func (e *Engine) AnalyzeResponseWithClientSilent(response *HTTPResponse, httpClient interface{}) []*FingerprintMatch {
-	// 类型适配
-	var client httpclient.HTTPClientInterface
-	if httpClient != nil {
-		if c, ok := httpClient.(httpclient.HTTPClientInterface); ok {
-			client = c
-		}
-	}
+	client, _ := httpClient.(httpclient.HTTPClientInterface)
 	return e.analyzeResponseInternal(response, client, true)
 }
 
@@ -89,18 +81,11 @@ func (e *Engine) analyzeResponseInternal(response *HTTPResponse, httpClient http
 
 	// 创建DSL上下文
 	var ctx *DSLContext
-	
-	// 从响应URL中提取基础URL
-	baseURL := ""
-	if response != nil && response.URL != "" {
-		if parsedURL, err := url.Parse(response.URL); err == nil {
-			baseURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
-		}
-	}
-	
+
 	if httpClient != nil {
-		ctx = e.createDSLContextWithClient(response, httpClient, baseURL)
-		logger.Debugf("创建增强DSL上下文，支持icon()主动探测: %s (Silent: %v)", baseURL, silent)
+		// baseURL 由 createDSLContextWithClient 内部兜底计算，避免重复解析
+		ctx = e.createDSLContextWithClient(response, httpClient, "")
+		logger.Debugf("创建增强DSL上下文，支持icon()主动探测: %s (Silent: %v)", ctx.BaseURL, silent)
 	} else {
 		ctx = e.createDSLContext(response)
 		logger.Debugf("创建基础DSL上下文，不支持icon()主动探测 (Silent: %v)", silent)

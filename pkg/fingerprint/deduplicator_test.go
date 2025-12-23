@@ -26,7 +26,16 @@ func TestDeduplicator(t *testing.T) {
 		t.Error("Expected true for new fingerprints on same URL")
 	}
 
-	// Test case 4: Clear
+	// Test case 4: Fingerprint list duplicates should not create a new key
+	d.Clear()
+	if !d.ShouldOutput(url1, []string{"CMS"}) {
+		t.Error("Expected true for first time output")
+	}
+	if d.ShouldOutput(url1, []string{"CMS", "CMS"}) {
+		t.Error("Expected false for duplicated fingerprint names (same logical key)")
+	}
+
+	// Test case 5: Clear
 	d.Clear()
 	if d.Count() != 0 {
 		t.Errorf("Expected count 0, got %d", d.Count())

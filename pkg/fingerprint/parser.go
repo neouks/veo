@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -16,6 +17,11 @@ var (
 // NewDSLParser 创建DSL解析器
 func NewDSLParser() *DSLParser {
 	return &DSLParser{}
+}
+
+// DSLParser DSL解析器
+type DSLParser struct {
+	regexCache sync.Map // map[string]*regexp.Regexp
 }
 
 // EvaluateDSL 评估DSL表达式
@@ -186,8 +192,10 @@ func (p *DSLParser) evaluateRegex(dsl string, ctx *DSLContext) (bool, bool) {
 			return false, true
 		}
 
-		if compiled, err := regexp.Compile(pattern); err == nil {
-			return compiled.MatchString(target), true
+		// 使用缓存编译正则
+		re, err := p.getCompiledRegex(pattern)
+		if err == nil {
+			return re.MatchString(target), true
 		}
 	}
 	return false, false
@@ -471,7 +479,8 @@ func (p *DSLParser) ExtractSnippet(dsl string, ctx *DSLContext) string {
 		if target == "" || pattern == "" {
 			return ""
 		}
-		re, err := regexp.Compile(pattern)
+		
+		re, err := p.getCompiledRegex(pattern)
 		if err != nil {
 			return ""
 		}
@@ -483,6 +492,21 @@ func (p *DSLParser) ExtractSnippet(dsl string, ctx *DSLContext) string {
 	}
 
 	return ""
+}
+
+// getCompiledRegex 获取编译后的正则（带缓存）
+func (p *DSLParser) getCompiledRegex(pattern string) (*regexp.Regexp, error) {
+	if v, ok := p.regexCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	p.regexCache.Store(pattern, re)
+	return re, nil
 }
 
 func (p *DSLParser) getTargetBySource(source string, ctx *DSLContext) string {

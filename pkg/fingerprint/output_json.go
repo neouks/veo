@@ -33,16 +33,19 @@ type JSONResult struct {
 
 // FormatMatch 实现OutputFormatter接口
 func (f *JSONOutputFormatter) FormatMatch(matches []*FingerprintMatch, response *HTTPResponse, tags ...string) {
-	if len(matches) == 0 {
+	if len(matches) == 0 || response == nil {
+		return
+	}
+
+	uniqueMatches := uniqueMatchesByRuleName(matches)
+	if len(uniqueMatches) == 0 {
 		return
 	}
 
 	// 收集指纹名称(用于去重)
-	fingerprintNames := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if match != nil {
-			fingerprintNames = append(fingerprintNames, match.RuleName)
-		}
+	fingerprintNames := make([]string, 0, len(uniqueMatches))
+	for _, match := range uniqueMatches {
+		fingerprintNames = append(fingerprintNames, match.RuleName)
 	}
 
 	// 去重检查
@@ -57,7 +60,7 @@ func (f *JSONOutputFormatter) FormatMatch(matches []*FingerprintMatch, response 
 		Title:         response.Title,
 		ContentLength: response.ContentLength,
 		ContentType:   response.ContentType,
-		Fingerprints:  matches,
+		Fingerprints:  uniqueMatches,
 		Tags:          tags,
 	}
 

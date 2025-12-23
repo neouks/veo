@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"veo/pkg/utils/redirect"
 )
 
 func TestHTTPClientRedirectFollowing(t *testing.T) {
@@ -53,7 +55,6 @@ func TestHTTPClientRedirectFollowing(t *testing.T) {
 				MaxRedirects:   5,
 				UserAgent:      "Test-Agent",
 				SkipTLSVerify:  true,
-				TLSTimeout:     3 * time.Second,
 			}
 			client := New(config)
 
@@ -86,13 +87,19 @@ func TestHTTPClientMaxRedirects(t *testing.T) {
 		MaxRedirects:   2, // 限制最大重定向次数
 		UserAgent:      "Test-Agent",
 		SkipTLSVerify:  true,
-		TLSTimeout:     3 * time.Second,
 	}
 	client := New(config)
 
-	_, _, err := client.MakeRequest(server.URL)
-	if err == nil {
-		t.Error("期望超过最大重定向次数时返回错误")
+	_, statusCode, headers, err := client.MakeRequestFull(server.URL)
+	if err != nil {
+		t.Fatalf("请求失败: %v", err)
+	}
+	// 达到最大重定向次数后，应返回最后一次的重定向响应
+	if statusCode != http.StatusFound {
+		t.Errorf("期望状态码 %d，实际得到 %d", http.StatusFound, statusCode)
+	}
+	if got := redirect.GetHeaderFirst(headers, "Location"); got == "" {
+		t.Error("期望重定向响应包含 Location 头部")
 	}
 }
 
@@ -141,7 +148,6 @@ func TestHTTPClientTLSConfiguration(t *testing.T) {
 				MaxRedirects:   5,
 				UserAgent:      "Test-Agent",
 				SkipTLSVerify:  tt.skipTLSVerify,
-				TLSTimeout:     3 * time.Second,
 			}
 			client := New(config)
 
@@ -158,28 +164,3 @@ func TestHTTPClientTLSConfiguration(t *testing.T) {
 	}
 }
 
-func TestHTTPClientTLSTimeout(t *testing.T) {
-	config := &Config{
-		Timeout:        5 * time.Second,
-		FollowRedirect: true,
-		MaxRedirects:   5,
-		UserAgent:      "Test-Agent",
-		SkipTLSVerify:  true,
-		TLSTimeout:     1 * time.Nanosecond, // 极短的超时时间
-	}
-	client := New(config)
-
-	// 验证TLS超时配置是否正确设置
-	if transport, ok := client.client.Transport.(*http.Transport); ok {
-		if transport.TLSHandshakeTimeout != config.TLSTimeout {
-			t.Errorf("TLS握手超时设置错误，期望 %v，实际 %v",
-				config.TLSTimeout, transport.TLSHandshakeTimeout)
-		}
-
-		if transport.TLSClientConfig.InsecureSkipVerify != config.SkipTLSVerify {
-			t.Error("TLS跳过验证设置错误")
-		}
-	} else {
-		t.Error("无法获取HTTP传输层配置")
-	}
-}

@@ -184,9 +184,6 @@ type DSLContext struct {
 	Engine     *Engine                        // 引擎实例（用于访问图标缓存）
 }
 
-// DSLParser DSL解析器
-type DSLParser struct {
-}
 
 // 静态文件过滤相关
 

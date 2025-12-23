@@ -90,8 +90,7 @@ func (rp *RequestProcessor) updateProcessingStats(response *interfaces.HTTPRespo
 }
 
 // finalizeProcessing 完成处理
-func (rp *RequestProcessor) finalizeProcessing(progressDone chan struct{}, stats *ProcessingStats, responseCount int) {
-	close(progressDone)
+func (rp *RequestProcessor) finalizeProcessing(stats *ProcessingStats) {
 	rp.logProcessingResults(stats)
 }
 

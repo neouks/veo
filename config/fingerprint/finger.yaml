@@ -1,4 +1,4 @@
-# version: 1.0.4
+# version: 1.0.5
 
 apache-activemq:
   dsl:
@@ -1616,7 +1616,7 @@ ueditor-jsp:
     - "contains(body, 'imageActionName')"
     - "contains(body, 'imageFieldName')"
 
-ueditor:
+ueditor组件:
   dsl:
     - "contains(body, 'ueditor')"
 

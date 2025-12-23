@@ -1,4 +1,3 @@
-
 package fingerprint
 
 import (
@@ -27,6 +26,32 @@ type OutputFormatter interface {
 	ShouldOutput(url string, fingerprintNames []string) bool
 }
 
+// uniqueMatchesByRuleName 对 matches 按 RuleName 去重（保留首次出现的匹配）
+// 这用于修复输出层偶发的重复指纹打印问题。
+func uniqueMatchesByRuleName(matches []*FingerprintMatch) []*FingerprintMatch {
+	if len(matches) <= 1 {
+		return matches
+	}
+
+	seen := make(map[string]struct{}, len(matches))
+	unique := make([]*FingerprintMatch, 0, len(matches))
+	for _, m := range matches {
+		if m == nil {
+			continue
+		}
+		name := strings.TrimSpace(m.RuleName)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		unique = append(unique, m)
+	}
+	return unique
+}
+
 // ConsoleOutputFormatter 控制台输出格式化器
 // 实现基于当前逻辑的控制台输出,包含去重、日志格式化等功能
 type ConsoleOutputFormatter struct {
@@ -53,16 +78,19 @@ func NewConsoleOutputFormatter(logMatches, showSnippet, showRules, consoleSnippe
 
 // FormatMatch 实现OutputFormatter接口
 func (f *ConsoleOutputFormatter) FormatMatch(matches []*FingerprintMatch, response *HTTPResponse, tags ...string) {
-	if !f.logMatches || len(matches) == 0 {
+	if !f.logMatches || len(matches) == 0 || response == nil {
+		return
+	}
+
+	uniqueMatches := uniqueMatchesByRuleName(matches)
+	if len(uniqueMatches) == 0 {
 		return
 	}
 
 	// 收集指纹名称(用于去重)
-	fingerprintNames := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if match != nil {
-			fingerprintNames = append(fingerprintNames, match.RuleName)
-		}
+	fingerprintNames := make([]string, 0, len(uniqueMatches))
+	for _, match := range uniqueMatches {
+		fingerprintNames = append(fingerprintNames, match.RuleName)
 	}
 
 	// 去重检查
@@ -71,7 +99,7 @@ func (f *ConsoleOutputFormatter) FormatMatch(matches []*FingerprintMatch, respon
 	}
 
 	// 构建指纹显示列表
-	fingerprintDisplays := f.buildFingerprintDisplays(matches)
+	fingerprintDisplays := f.buildFingerprintDisplays(uniqueMatches)
 
 	// 格式化日志行
 	line := formatter.FormatLogLine(
@@ -94,7 +122,7 @@ func (f *ConsoleOutputFormatter) FormatMatch(matches []*FingerprintMatch, respon
 
 	// 输出snippet(如果启用)
 	if f.consoleSnippetEnabled && f.showSnippet {
-		f.outputSnippets(matches)
+		f.outputSnippets(uniqueMatches)
 	}
 }
 
@@ -234,7 +262,6 @@ func (f *ConsoleOutputFormatter) SetShowRules(enabled bool) {
 func GetGlobalOutputFormatter() OutputFormatter {
 	return globalOutputFormatter
 }
-
 
 // GetOutputStats 获取输出统计信息
 func (f *ConsoleOutputFormatter) GetOutputStats() map[string]interface{} {

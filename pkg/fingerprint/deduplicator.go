@@ -71,18 +71,38 @@ func (d *Deduplicator) generateCacheKey(rawURL string, fingerprintNames []string
 	builder.WriteString(parsedURL.Path)
 	builder.WriteByte('|')
 
-	// 对指纹名称排序以确保一致性
+	// 对指纹名称排序以确保一致性（同时去重，避免输入中出现重复名称导致 key 不稳定）
 	if len(fingerprintNames) == 0 {
 		return builder.String()
-	} else if len(fingerprintNames) == 1 {
-		builder.WriteString(fingerprintNames[0])
-	} else {
-		// 创建排序副本
-		sortedNames := make([]string, len(fingerprintNames))
-		copy(sortedNames, fingerprintNames)
-		sort.Strings(sortedNames)
-		builder.WriteString(strings.Join(sortedNames, ","))
 	}
 
+	if len(fingerprintNames) == 1 {
+		name := strings.TrimSpace(fingerprintNames[0])
+		builder.WriteString(name)
+		return builder.String()
+	}
+
+	// 创建排序副本
+	sortedNames := make([]string, 0, len(fingerprintNames))
+	for _, name := range fingerprintNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		sortedNames = append(sortedNames, name)
+	}
+	if len(sortedNames) == 0 {
+		return builder.String()
+	}
+
+	sort.Strings(sortedNames)
+	unique := make([]string, 0, len(sortedNames))
+	for _, name := range sortedNames {
+		if len(unique) == 0 || unique[len(unique)-1] != name {
+			unique = append(unique, name)
+		}
+	}
+
+	builder.WriteString(strings.Join(unique, ","))
 	return builder.String()
 }

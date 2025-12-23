@@ -651,7 +651,7 @@ func handleRuleUpdates(args *CLIArgs) {
 	}
 
 	// 检查更新 (同步执行，确保在扫描前提示)
-	// 使用短超时 (3s) 避免阻塞过久
+	// 使用短超时 (1s) 避免阻塞过久
 	hasUpdate, localVer, remoteVer, err := updater.CheckForUpdates()
 	if err != nil {
 		logger.Debugf("检查指纹库更新失败: %v", err)
