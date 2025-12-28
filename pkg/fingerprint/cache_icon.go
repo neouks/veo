@@ -35,7 +35,6 @@ func (c *IconCache) CheckMatch(iconURL string, expectedHash string, client httpc
 	c.mu.RLock()
 	if match, exists := c.matchCache[matchKey]; exists {
 		c.mu.RUnlock()
-		logger.Debugf("icon()匹配缓存命中: %s (%s) -> %v", iconURL, expectedHash, match)
 		return match, true
 	}
 	c.mu.RUnlock()
@@ -43,7 +42,6 @@ func (c *IconCache) CheckMatch(iconURL string, expectedHash string, client httpc
 	// 2. 获取图标哈希（内部处理去重和请求）
 	actualHash, err := c.GetHash(iconURL, client)
 	if err != nil {
-		logger.Debugf("获取图标失败: %s, 错误: %v", iconURL, err)
 		return false, false
 	}
 
@@ -54,7 +52,6 @@ func (c *IconCache) CheckMatch(iconURL string, expectedHash string, client httpc
 	c.matchCache[matchKey] = match
 	c.mu.Unlock()
 
-	logger.Debugf("icon()匹配: %s -> %v", iconURL, match)
 	return match, true
 }
 
@@ -115,10 +112,8 @@ func (c *IconCache) GetHash(iconURL string, client httpclient.HTTPClientInterfac
 // handleCachedHash 处理缓存命中的返回值
 func (c *IconCache) handleCachedHash(iconURL, val string) (string, error) {
 	if val == "FAILED" {
-		logger.Debugf("图标失败缓存命中: %s", iconURL)
 		return "", fmt.Errorf("图标请求失败（缓存结果）")
 	}
-	logger.Debugf("图标成功缓存命中: %s", iconURL)
 	return val, nil
 }
 

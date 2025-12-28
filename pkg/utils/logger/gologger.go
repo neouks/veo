@@ -47,6 +47,7 @@ var (
 	globalConfig = getDefaultLogConfig()
 	globalLevel  = parseLogLevel(globalConfig.Level)
 	outputMu     sync.Mutex
+	lineCleaner  func()
 )
 
 // InitializeLogger 初始化日志系统
@@ -124,21 +125,29 @@ func levelColor(level Level) string {
 	}
 }
 
+func shouldLog(level Level) bool {
+	globalMu.RLock()
+	minLevel := globalLevel
+	globalMu.RUnlock()
+	return level >= minLevel
+}
+
 func logf(level Level, format string, args ...interface{}) {
+	if !shouldLog(level) {
+		return
+	}
 	msg := fmt.Sprintf(format, args...)
 	logMessage(level, msg)
 }
 
 func logMessage(level Level, message string) {
-	globalMu.RLock()
-	cfg := globalConfig
-	minLevel := globalLevel
-	globalMu.RUnlock()
-
-	// 过滤：仅输出 >= 最小级别的日志
-	if level < minLevel {
+	if !shouldLog(level) {
 		return
 	}
+
+	globalMu.RLock()
+	cfg := globalConfig
+	globalMu.RUnlock()
 
 	enableColors := cfg != nil && cfg.ColorOutput && shouldUseColors()
 	label := levelLabel(level)
@@ -153,6 +162,10 @@ func logMessage(level Level, message string) {
 	// 避免多 goroutine 输出交错
 	outputMu.Lock()
 	defer outputMu.Unlock()
+
+	if lineCleaner != nil {
+		lineCleaner()
+	}
 
 	if level >= LevelError {
 		fmt.Fprintln(os.Stderr, line)
@@ -184,6 +197,20 @@ func SetColorOutput(enabled bool) {
 	}
 	globalConfig.ColorOutput = enabled
 	globalMu.Unlock()
+}
+
+// SetLineCleaner 设置日志输出前的行清理回调
+func SetLineCleaner(cleaner func()) {
+	outputMu.Lock()
+	defer outputMu.Unlock()
+	lineCleaner = cleaner
+}
+
+// WithOutputLock 在日志输出锁内执行函数
+func WithOutputLock(fn func()) {
+	outputMu.Lock()
+	defer outputMu.Unlock()
+	fn()
 }
 
 // 全局日志函数

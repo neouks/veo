@@ -11,6 +11,7 @@ import (
 // 以JSON格式输出指纹识别结果，便于机器解析
 type JSONOutputFormatter struct {
 	deduplicator *Deduplicator
+	onOutput     func(response *HTTPResponse, matches []*FingerprintMatch, tags []string)
 }
 
 // NewJSONOutputFormatter 创建JSON输出格式化器
@@ -53,6 +54,10 @@ func (f *JSONOutputFormatter) FormatMatch(matches []*FingerprintMatch, response 
 		return
 	}
 
+	if f.onOutput != nil {
+		f.onOutput(response, uniqueMatches, tags)
+	}
+
 	// 构造结果对象
 	res := JSONResult{
 		URL:           response.URL,
@@ -77,4 +82,9 @@ func (f *JSONOutputFormatter) FormatNoMatch(response *HTTPResponse) {}
 // ShouldOutput 实现OutputFormatter接口
 func (f *JSONOutputFormatter) ShouldOutput(urlStr string, fingerprintNames []string) bool {
 	return f.deduplicator.ShouldOutput(urlStr, fingerprintNames)
+}
+
+// SetOutputHook 设置输出回调（仅在实际输出时触发）
+func (f *JSONOutputFormatter) SetOutputHook(hook func(response *HTTPResponse, matches []*FingerprintMatch, tags []string)) {
+	f.onOutput = hook
 }

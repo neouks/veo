@@ -2,6 +2,7 @@ package dirscan
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
@@ -41,7 +42,11 @@ func RunRecursiveScan(
 		// 检查Context取消
 		select {
 		case <-ctx.Done():
-			logger.Warn("递归扫描被取消")
+			if maxDepth > 0 {
+				logger.Warn("递归扫描被取消")
+			} else {
+				logger.Warn("扫描被取消")
+			}
 			return allResults, nil
 		default:
 		}
@@ -76,7 +81,19 @@ func RunRecursiveScan(
 		// 执行单层扫描
 		results, err := layerScanner(currentTargets, currentFilter, d)
 		if err != nil {
-			logger.Errorf("目录扫描出错 (Depth %d): %v", d, err)
+			if errors.Is(err, ErrNoValidHTTPResponse) {
+				target := ""
+				if len(currentTargets) == 1 {
+					target = currentTargets[0]
+				}
+				if target != "" {
+					logger.Errorf("Scanning For %s Error，No Valid HTTP response received", target)
+				} else {
+					logger.Errorf("Scanning Error，No Valid HTTP response received")
+				}
+			} else {
+				logger.Errorf("目录扫描出错 (Depth %d): %v", d, err)
+			}
 			// 继续处理部分结果，不中断整个流程
 		}
 
@@ -179,6 +196,18 @@ func ExtractNextLevelTargets(results []interfaces.HTTPResponse, alreadyScanned m
 // RecursionCollector 用于递归扫描的临时收集器
 type RecursionCollector struct {
 	urls map[string]int
+}
+
+// NewRecursionCollector 创建递归扫描用的临时收集器
+func NewRecursionCollector(targets []string) *RecursionCollector {
+	urls := make(map[string]int, len(targets))
+	for _, t := range targets {
+		if t == "" {
+			continue
+		}
+		urls[t] = 1
+	}
+	return &RecursionCollector{urls: urls}
 }
 
 // GetURLMap 获取收集的URL映射表

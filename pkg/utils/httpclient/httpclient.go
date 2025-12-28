@@ -111,6 +111,12 @@ func New(config *Config) *Client {
 		if dialFunc != nil {
 			fastClient.Dial = dialFunc
 		}
+	} else {
+		dialer := &fasthttp.TCPDialer{
+			Concurrency:      config.MaxConcurrent,
+			DNSCacheDuration: time.Minute,
+		}
+		fastClient.DialTimeout = dialer.DialTimeout
 	}
 
 	return &Client{

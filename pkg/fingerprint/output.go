@@ -62,6 +62,7 @@ type ConsoleOutputFormatter struct {
 
 	// 去重组件
 	deduplicator *Deduplicator // 结果去重器
+	onOutput     func(response *HTTPResponse, matches []*FingerprintMatch, tags []string)
 }
 
 // NewConsoleOutputFormatter 创建控制台输出格式化器
@@ -95,6 +96,10 @@ func (f *ConsoleOutputFormatter) FormatMatch(matches []*FingerprintMatch, respon
 	// 去重检查
 	if !f.ShouldOutput(response.URL, fingerprintNames) {
 		return
+	}
+
+	if f.onOutput != nil {
+		f.onOutput(response, uniqueMatches, tags)
 	}
 
 	// 构建指纹显示列表
@@ -134,6 +139,10 @@ func (f *ConsoleOutputFormatter) FormatNoMatch(response *HTTPResponse) {
 	// 去重检查(无指纹的URL)
 	if !f.ShouldOutput(response.URL, nil) {
 		return
+	}
+
+	if f.onOutput != nil {
+		f.onOutput(response, nil, nil)
 	}
 
 	line := formatter.FormatLogLine(
@@ -227,4 +236,9 @@ func highlightedSnippetLines(snippet, matcher string) []string {
 // SetShowRules 动态控制规则显示
 func (f *ConsoleOutputFormatter) SetShowRules(enabled bool) {
 	f.showRules = enabled
+}
+
+// SetOutputHook 设置输出回调（仅在实际输出时触发）
+func (f *ConsoleOutputFormatter) SetOutputHook(hook func(response *HTTPResponse, matches []*FingerprintMatch, tags []string)) {
+	f.onOutput = hook
 }

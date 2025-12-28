@@ -529,7 +529,6 @@ func (a *attacker) attack(res http.ResponseWriter, req *http.Request) {
 		proxyRes, err = f.ConnContext.ServerConn.client.Do(proxyReq)
 	}
 	if err != nil {
-		// [优化] 过滤 context canceled 错误日志，避免正常取消时产生噪音
 		if err == context.Canceled {
 			return
 		}

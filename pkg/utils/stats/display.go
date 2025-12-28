@@ -16,17 +16,19 @@ type ScanStats struct {
 	TotalRequests  int64     // 总请求数
 	CompletedReqs  int64     // 已完成请求数
 	TimeoutCount   int64     // 超时次数
+	ErrorCount     int64     // 请求失败次数
 	LastRPS        int64     // 最近的RPS
 	mu             sync.RWMutex
 }
 
 // StatsDisplay 统计显示器
 type StatsDisplay struct {
-	stats    *ScanStats
-	enabled  bool
-	stopChan chan struct{}
-	ticker   *time.Ticker
-	mu       sync.RWMutex
+	stats               *ScanStats
+	enabled             bool
+	stopChan            chan struct{}
+	ticker              *time.Ticker
+	mu                  sync.RWMutex
+	manualTotalRequests int32
 }
 
 // NewStatsDisplay 创建新的统计显示器
@@ -52,6 +54,7 @@ func (sd *StatsDisplay) Enable() {
 	sd.enabled = true
 	sd.stats.StartTime = time.Now()
 	sd.ticker = time.NewTicker(5 * time.Second) // 每5秒更新一次
+	logger.SetLineCleaner(sd.clearLine)
 
 	go sd.displayLoop()
 }
@@ -69,6 +72,7 @@ func (sd *StatsDisplay) Disable() {
 	if sd.ticker != nil {
 		sd.ticker.Stop()
 	}
+	logger.SetLineCleaner(nil)
 
 	select {
 	case sd.stopChan <- struct{}{}:
@@ -83,11 +87,17 @@ func (sd *StatsDisplay) SetTotalHosts(count int64) {
 
 // SetTotalRequests 设置总请求数
 func (sd *StatsDisplay) SetTotalRequests(count int64) {
+	if atomic.LoadInt32(&sd.manualTotalRequests) == 1 {
+		return
+	}
 	atomic.StoreInt64(&sd.stats.TotalRequests, count)
 }
 
 // AddTotalRequests 累加总请求数（用于批量扫描）
 func (sd *StatsDisplay) AddTotalRequests(count int64) {
+	if atomic.LoadInt32(&sd.manualTotalRequests) == 1 {
+		return
+	}
 	atomic.AddInt64(&sd.stats.TotalRequests, count)
 }
 
@@ -104,6 +114,11 @@ func (sd *StatsDisplay) IncrementCompletedRequests() {
 // IncrementTimeouts 增加超时次数
 func (sd *StatsDisplay) IncrementTimeouts() {
 	atomic.AddInt64(&sd.stats.TimeoutCount, 1)
+}
+
+// IncrementErrors 增加失败次数
+func (sd *StatsDisplay) IncrementErrors() {
+	atomic.AddInt64(&sd.stats.ErrorCount, 1)
 }
 
 // displayLoop 显示循环
@@ -151,6 +166,7 @@ func (sd *StatsDisplay) displayStats() {
 	totalRequests := atomic.LoadInt64(&sd.stats.TotalRequests)
 	completedReqs := atomic.LoadInt64(&sd.stats.CompletedReqs)
 	timeoutCount := atomic.LoadInt64(&sd.stats.TimeoutCount)
+	errorCount := atomic.LoadInt64(&sd.stats.ErrorCount)
 	rps := atomic.LoadInt64(&sd.stats.LastRPS)
 
 	// 计算完成百分比
@@ -161,11 +177,13 @@ func (sd *StatsDisplay) displayStats() {
 
 	// 格式化显示
 	timeStr := fmt.Sprintf("[%d:%02d:%02d]", hours, minutes, seconds)
-	statsStr := fmt.Sprintf("%s Hosts: %d | RPS: %d | Done: %d | Timeout: %d | Requests: %d/%d (%.1f%%) \r",
-		timeStr, totalHosts, rps, completedHosts, timeoutCount, completedReqs, totalRequests, percentage)
+	statsStr := fmt.Sprintf("%s Hosts: %d | RPS: %d | Done: %d | Timeout: %d | ERRORS: %d | Requests: %d/%d (%.1f%%) \r",
+		timeStr, totalHosts, rps, completedHosts, timeoutCount, errorCount, completedReqs, totalRequests, percentage)
 
 	// 清除当前行并显示新的统计信息
-	fmt.Printf("\r\033[K%s", statsStr)
+	logger.WithOutputLock(func() {
+		fmt.Printf("\r\033[K%s", statsStr)
+	})
 }
 
 // GetStats 获取当前统计信息
@@ -185,6 +203,7 @@ func (sd *StatsDisplay) Reset() {
 	sd.stats = &ScanStats{
 		StartTime: time.Now(),
 	}
+	atomic.StoreInt32(&sd.manualTotalRequests, 0)
 }
 
 // ShowFinalStats 显示最终统计信息
@@ -199,6 +218,7 @@ func (sd *StatsDisplay) ShowFinalStats() {
 	totalRequests := atomic.LoadInt64(&sd.stats.TotalRequests)
 	completedReqs := atomic.LoadInt64(&sd.stats.CompletedReqs)
 	timeoutCount := atomic.LoadInt64(&sd.stats.TimeoutCount)
+	errorCount := atomic.LoadInt64(&sd.stats.ErrorCount)
 
 	// 修复已完成主机数统计错误：确保不超过总主机数
 	if completedHosts > totalHosts {
@@ -222,6 +242,23 @@ func (sd *StatsDisplay) ShowFinalStats() {
 	timeStr := fmt.Sprintf("%dS", elapsedSeconds)
 
 	// 清除当前行并显示最终统计（单行紧凑格式）
-	fmt.Printf("\r\033[K\n[INF] Times: %s | Host: %d/%d | Request: %d/%d | Timeout: %d\n",
-		timeStr, completedHosts, totalHosts, completedReqs, totalRequests, timeoutCount)
+	logger.WithOutputLock(func() {
+		fmt.Printf("\r\033[K\n[INF] Times: %s | Host: %d/%d | Request: %d/%d | Timeout: %d | ERRORS: %d\n",
+			timeStr, completedHosts, totalHosts, completedReqs, totalRequests, timeoutCount, errorCount)
+	})
+}
+
+func (sd *StatsDisplay) clearLine() {
+	fmt.Print("\r\033[K")
+}
+
+// EnableManualTotalRequests 预置总请求数并禁止自动累加
+func (sd *StatsDisplay) EnableManualTotalRequests(total int64) {
+	atomic.StoreInt64(&sd.stats.TotalRequests, total)
+	atomic.StoreInt32(&sd.manualTotalRequests, 1)
+}
+
+// DisableManualTotalRequests 恢复自动累加
+func (sd *StatsDisplay) DisableManualTotalRequests() {
+	atomic.StoreInt32(&sd.manualTotalRequests, 0)
 }

@@ -1,6 +1,7 @@
 package dirscan
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -38,7 +39,11 @@ func (e *Engine) SetProxy(proxyURL string) {
 }
 
 // PerformScanWithFilter 执行扫描（支持自定义过滤器）
-func (e *Engine) PerformScanWithFilter(collectorInstance interfaces.URLCollectorInterface, recursive bool, filter *ResponseFilter) (*ScanResult, error) {
+func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance interfaces.URLCollectorInterface, recursive bool, filter *ResponseFilter) (*ScanResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	e.mu.Lock()
 	if e.stats == nil {
 		e.stats = &Statistics{StartTime: time.Now()}
@@ -68,7 +73,6 @@ func (e *Engine) PerformScanWithFilter(collectorInstance interfaces.URLCollector
 		responseFilter = CreateResponseFilterFromExternal()
 	}
 
-	// [修复] 注入 HTTP 客户端以支持 icon() 等主动探测指纹
 	if responseFilter != nil {
 		processor := e.getOrCreateRequestProcessor()
 		responseFilter.SetHTTPClient(processor)
@@ -84,15 +88,19 @@ func (e *Engine) PerformScanWithFilter(collectorInstance interfaces.URLCollector
 
 	// 3. 执行HTTP请求（带实时过滤回调）
 	actualConcurrency := e.getActualConcurrency()
-	logger.Infof("%d URL，Threads: %d，Random UA: true", len(scanURLs), actualConcurrency)
+	scanLabel := buildScanLabel(collectorInstance)
+	if scanLabel != "" {
+		logger.Infof("Scanning For %s, %d URL，Threads: %d，Random UA: true", scanLabel, len(scanURLs), actualConcurrency)
+	} else {
+		logger.Infof("%d URL，Threads: %d，Random UA: true", len(scanURLs), actualConcurrency)
+	}
 
-	responses, err := e.performHTTPRequestsWithCallback(scanURLs, func(resp *interfaces.HTTPResponse) {
+	responses, err := e.performHTTPRequestsWithCallback(ctx, scanURLs, func(resp *interfaces.HTTPResponse) {
 		if resp == nil {
 			return
 		}
 		// 转换并过滤
 		// 注意：这里我们构造一个单元素的切片进行处理
-		// [优化] 现在 FilterResponses 接收 []*HTTPResponse，直接传递即可
 		filterInput := []*interfaces.HTTPResponse{resp}
 		singleResult := responseFilter.FilterResponses(filterInput)
 		if singleResult == nil {
@@ -120,7 +128,7 @@ func (e *Engine) PerformScanWithFilter(collectorInstance interfaces.URLCollector
 	}
 
 	if len(responses) == 0 {
-		return nil, fmt.Errorf("没有收到有效的HTTP响应")
+		return nil, ErrNoValidHTTPResponse
 	}
 
 	logger.Debugf("HTTP扫描完成，收到 %d 个响应", len(responses))
@@ -163,7 +171,7 @@ func (e *Engine) PerformScanWithFilter(collectorInstance interfaces.URLCollector
 
 // PerformScanWithOptions 执行扫描（支持选项）
 func (e *Engine) PerformScanWithOptions(collectorInstance interfaces.URLCollectorInterface, recursive bool) (*ScanResult, error) {
-	return e.PerformScanWithFilter(collectorInstance, recursive, nil)
+	return e.PerformScanWithFilter(context.Background(), collectorInstance, recursive, nil)
 }
 
 // generateScanURLs 生成扫描URL
@@ -182,18 +190,42 @@ func (e *Engine) generateScanURLs(collectorInstance interfaces.URLCollectorInter
 }
 
 // performHTTPRequestsWithCallback 执行HTTP请求（支持回调）
-func (e *Engine) performHTTPRequestsWithCallback(scanURLs []string, callback func(*interfaces.HTTPResponse)) ([]*interfaces.HTTPResponse, error) {
+func (e *Engine) performHTTPRequestsWithCallback(ctx context.Context, scanURLs []string, callback func(*interfaces.HTTPResponse)) ([]*interfaces.HTTPResponse, error) {
 	logger.Debug("开始执行HTTP扫描 (Callback模式)")
 
 	// 获取或创建请求处理器
 	processor := e.getOrCreateRequestProcessor()
 
 	// 执行请求
-	responses := processor.ProcessURLsWithCallback(scanURLs, callback)
+	responses := processor.ProcessURLsWithCallbackWithContext(ctx, scanURLs, callback)
 
 	atomic.StoreInt64(&e.stats.SuccessRequests, int64(len(responses)))
 
 	return responses, nil
+}
+
+func buildScanLabel(collectorInstance interfaces.URLCollectorInterface) string {
+	if collectorInstance == nil {
+		return ""
+	}
+	urlMap := collectorInstance.GetURLMap()
+	if len(urlMap) != 1 {
+		return ""
+	}
+	for urlStr := range urlMap {
+		return urlStr
+	}
+	return ""
+}
+
+// SetRequestProcessor 注入外部请求处理器（复用全局配置）
+func (e *Engine) SetRequestProcessor(processor *requests.RequestProcessor) {
+	if processor == nil {
+		return
+	}
+	e.mu.Lock()
+	e.requestProcessor = processor
+	e.mu.Unlock()
 }
 
 // getOrCreateRequestProcessor 获取或创建请求处理器
@@ -206,18 +238,20 @@ func (e *Engine) getOrCreateRequestProcessor() *requests.RequestProcessor {
 		e.requestProcessor = requests.NewRequestProcessor(nil)
 	}
 
-	// [重构] 强制设置配置，不依赖于之前的状态，确保幂等性
 	reqConfig := e.requestProcessor.GetConfig()
 
-	// 1. 始终应用代理配置（如果有）
+	// 统一应用引擎侧配置（仅覆盖必要项）
 	if e.config.ProxyURL != "" {
 		reqConfig.ProxyURL = e.config.ProxyURL
 	}
-
-	// 2. 统一重定向策略（与指纹识别共用）
+	if e.config.MaxConcurrency > 0 {
+		reqConfig.MaxConcurrent = e.config.MaxConcurrency
+	}
+	if e.config.RequestTimeout > 0 {
+		reqConfig.Timeout = e.config.RequestTimeout
+	}
 	requests.ApplyRedirectPolicy(reqConfig)
 
-	// 3. 直接更新，无需条件判断，确保配置绝对生效
 	e.requestProcessor.UpdateConfig(reqConfig)
 
 	return e.requestProcessor

@@ -52,7 +52,6 @@ func DefaultFilterConfig() *FilterConfig {
 		},
 
 		// 相似页面过滤容错阈值默认配置
-		// [优化] 增加默认容错阈值到 100 字节，以便更好地聚合包含随机ID/时间戳的WAF页面/403页面
 		FilterTolerance: 100, // 默认100字节容错
 	}
 }
@@ -104,6 +103,7 @@ type ResponseFilter struct {
 	// 指纹识别引擎
 	fingerprintEngine interfaces.FingerprintAnalyzer
 	httpClient        httpclient.HTTPClientInterface // 用于指纹识别的主动探测（如icon hash）
+	onValid           func(*interfaces.HTTPResponse)
 }
 
 // NewResponseFilter 创建新的响应过滤器
@@ -136,6 +136,13 @@ func (rf *ResponseFilter) SetHTTPClient(client httpclient.HTTPClientInterface) {
 	defer rf.mu.Unlock()
 	rf.httpClient = client
 	logger.Debug("响应过滤器已设置HTTP客户端，启用icon()等主动探测支持")
+}
+
+// SetOnValid 设置有效结果回调
+func (rf *ResponseFilter) SetOnValid(handler func(*interfaces.HTTPResponse)) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.onValid = handler
 }
 
 // FilterResponses 过滤响应列表
@@ -213,11 +220,20 @@ func (rf *ResponseFilter) FilterResponses(responses []*interfaces.HTTPResponse) 
 	// 释放锁，避免指纹识别期间阻塞其他请求，并防止死锁
 	rf.mu.Unlock()
 
-	// 步骤7: 指纹识别 (对所有结果) - 在锁外执行
+	// 步骤7: 指纹识别 (仅对有效结果) - 在锁外执行
 	if engine != nil {
 		rf.performFingerprintOnList(result.ValidPages, engine, client)
-		rf.performFingerprintOnList(result.PrimaryFilteredPages, engine, client)
-		rf.performFingerprintOnList(result.StatusFilteredPages, engine, client)
+	}
+
+	rf.mu.RLock()
+	onValid := rf.onValid
+	rf.mu.RUnlock()
+	if onValid != nil && len(result.ValidPages) > 0 {
+		for _, page := range result.ValidPages {
+			if page != nil {
+				onValid(page)
+			}
+		}
 	}
 
 	return result
@@ -429,9 +445,9 @@ func (rf *ResponseFilter) performFingerprintRecognition(page *interfaces.HTTPRes
 
 	logger.Debugf("开始识别: %s", page.URL)
 
-	// 直接调用接口方法
-	// 关键修复：传递 httpClient 以支持 icon() 等主动探测功能
-	matches := engine.AnalyzeResponseWithClientSilent(&analysisResp, client)
+	// 目录扫描二次识别仅使用被动识别，不启用icon()/path/404等主动探测
+	_ = client
+	matches := engine.AnalyzeResponseWithClientSilent(&analysisResp, nil)
 
 	logger.Debugf("识别完成: %s, 匹配数量: %d", page.URL, len(matches))
 

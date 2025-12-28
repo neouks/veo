@@ -500,6 +500,7 @@
 /v3/api-docs;.js
 
 # 3. 组件路径
+/jenkins/
 /arcgis/
 /arcgis/tokens/generateToken
 /ejbserver/ejb

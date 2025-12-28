@@ -188,6 +188,16 @@ func (dm *DictionaryManager) GetCommonDictionary() []string {
 	defer cache.mu.RUnlock()
 	return append([]string(nil), cache.entries...)
 }
+
+// GetCommonDictionarySize 返回字典条目数（避免拷贝）
+func GetCommonDictionarySize() int {
+	dm := &DictionaryManager{}
+	_ = dm.LoadDictionaries()
+	cache := getCache()
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	return len(cache.entries)
+}
 func (dm *DictionaryManager) Reset() {
 	cache := getCache()
 	cache.mu.Lock()

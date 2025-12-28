@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"strings"
 
 	modulepkg "veo/pkg/core/module"
-	"veo/pkg/dirscan"
 	"veo/pkg/fingerprint"
 	report "veo/pkg/reporter"
 	"veo/pkg/types"
@@ -15,98 +13,6 @@ import (
 	"veo/pkg/utils/logger"
 	sharedutils "veo/pkg/utils/shared"
 )
-
-func (sc *ScanController) applyFilterForTarget(responses []*interfaces.HTTPResponse, target string, externalFilter *dirscan.ResponseFilter) (*interfaces.FilterResult, error) {
-	logger.Debugf("开始对目标 %s 应用过滤器，响应数量: %d (外部过滤器: %v)", target, len(responses), externalFilter != nil)
-
-	var responseFilter *dirscan.ResponseFilter
-
-	if externalFilter != nil {
-		// 使用传入的外部过滤器（通常用于递归扫描共享状态）
-		responseFilter = externalFilter
-		logger.Debugf("使用外部传入的过滤器")
-	} else {
-		// 非递归模式（初始扫描）：使用站点级别缓存
-		targetKey := sc.extractBaseURL(target)
-
-		sc.siteFiltersMu.Lock()
-		var exists bool
-		responseFilter, exists = sc.siteFilters[targetKey]
-		if !exists {
-			responseFilter = dirscan.CreateResponseFilterFromExternal()
-
-			if sc.fingerprintEngine != nil {
-				responseFilter.SetFingerprintEngine(sc.fingerprintEngine)
-				logger.Debugf("目录扫描模块已启用指纹二次识别功能，引擎类型: %T", sc.fingerprintEngine)
-
-				// [取消] 二次指纹识别无需主动探测（icon和404）
-				// 仅保留被动页面识别，避免重复发包
-				// responseFilter.SetHTTPClient(sc.requestProcessor)
-			} else {
-				logger.Debugf("指纹引擎为nil，未启用二次识别")
-			}
-
-			sc.siteFilters[targetKey] = responseFilter
-			logger.Debugf("为站点 %s 创建新的过滤器", targetKey)
-		} else {
-			logger.Debugf("复用站点 %s 的过滤器状态", targetKey)
-		}
-		sc.siteFiltersMu.Unlock()
-	}
-
-	// 应用过滤器
-	filterResult := responseFilter.FilterResponses(responses)
-	logger.Debugf("过滤器返回 - ValidPages: %d, PrimaryFiltered: %d, StatusFiltered: %d",
-		len(filterResult.ValidPages), len(filterResult.PrimaryFilteredPages), len(filterResult.StatusFilteredPages))
-
-	// [去重] 全局结果去重，只显示未显示过的URL
-	sc.displayedURLsMu.Lock()
-	var uniqueValidPages []*interfaces.HTTPResponse
-	for _, page := range filterResult.ValidPages {
-		if !sc.displayedURLs[page.URL] {
-			sc.displayedURLs[page.URL] = true
-			uniqueValidPages = append(uniqueValidPages, page)
-		}
-	}
-	filterResult.ValidPages = uniqueValidPages
-	sc.displayedURLsMu.Unlock()
-
-	// 显示单个目标的过滤结果（现在会包含指纹信息）
-	logger.Debugf("目标 %s 过滤完成:", target)
-	// [重构] 打印逻辑移出，这里不再直接打印，但为了调试信息，可以保留简单的 count 输出
-	// responseFilter.PrintFilterResult(filterResult)
-
-	logger.Debugf("目标 %s 过滤完成 - 原始响应: %d, 有效结果: %d",
-		target, len(responses), len(filterResult.ValidPages))
-
-	return filterResult, nil
-}
-
-// processTargetResponses 处理目标响应：类型转换、应用过滤器、收集统计
-func (sc *ScanController) processTargetResponses(ctx context.Context, responses []*interfaces.HTTPResponse, target string, filter *dirscan.ResponseFilter) ([]*interfaces.HTTPResponse, error) {
-	if len(responses) == 0 {
-		return nil, nil
-	}
-
-	// 应用过滤器 (直接使用指针切片)
-	filterResult, err := sc.applyFilterForTarget(responses, target, filter)
-	if err != nil {
-		logger.Errorf("目标 %s 过滤器应用失败: %v", target, err)
-		// 如果过滤失败，返回原始结果（Fail Open）
-		return responses, err
-	}
-
-	// 收集被过滤的页面用于报告
-	sc.collectedResultsMu.Lock()
-	sc.collectedPrimaryFiltered = append(sc.collectedPrimaryFiltered, toValueSlice(filterResult.PrimaryFilteredPages)...)
-	sc.collectedStatusFiltered = append(sc.collectedStatusFiltered, toValueSlice(filterResult.StatusFilteredPages)...)
-	sc.collectedResultsMu.Unlock()
-
-	// 返回有效结果
-	// 注意：之前这里直接返回 ValidPages，但调用方 (如 passive scan) 可能期望 []interfaces.HTTPResponse
-	// 但 processTargetResponses 签名已改为返回 []*interfaces.HTTPResponse，所以直接返回
-	return filterResult.ValidPages, nil
-}
 
 func (sc *ScanController) generateConsoleJSON(dirPages, fingerprintPages []interfaces.HTTPResponse, filterResult *interfaces.FilterResult) (string, error) {
 	var matches []types.FingerprintMatch

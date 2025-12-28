@@ -112,7 +112,6 @@ func Execute(rawURL string, fetcher HTTPFetcherFull, config *Config) (*interface
 		}
 
 		if redirectCount >= config.MaxRedirects {
-			logger.Warnf("超过最大重定向次数(%d): %s", config.MaxRedirects, currentURL)
 			return response, nil
 		}
 

@@ -64,7 +64,6 @@ func (fa *FingerprintAddon) Requestheaders(f *proxy.Flow) {
 	// 添加防缓存头部，强制获取最新内容
 	fa.addNoCacheHeaders(f)
 
-	// [新增] 为指纹识别添加自定义Cookie头
 	fa.addFingerprintCookieHeaders(f)
 
 	// 应用全局配置中的自定义HTTP头部（如学习到的认证头部）

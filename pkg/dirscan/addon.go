@@ -120,20 +120,16 @@ func (da *DirscanAddon) TriggerScan() (*ScanResult, error) {
 	}
 
 	// 定义层级扫描器 (用于递归模式)
+	scanCtx := context.Background()
 	layerScanner := func(layerTargets []string, filter *ResponseFilter, currentDepth int) ([]interfaces.HTTPResponse, error) {
 		// 创建临时收集器
-		tempCollector := &RecursionCollector{
-			urls: make(map[string]int),
-		}
-		for _, t := range layerTargets {
-			tempCollector.urls[t] = 1
-		}
+		tempCollector := NewRecursionCollector(layerTargets)
 
 		// 执行扫描
 		// depth==0：首层扫描应使用非递归URL生成（扫描根目录 + 路径层级）
 		// depth>0 ：递归层扫描仅扫描当前目录（不回溯）
 		recursive := currentDepth > 0
-		scanResult, err := da.engine.PerformScanWithFilter(tempCollector, recursive, filter)
+		scanResult, err := da.engine.PerformScanWithFilter(scanCtx, tempCollector, recursive, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -163,31 +159,31 @@ func (da *DirscanAddon) TriggerScan() (*ScanResult, error) {
 		return validPages, nil
 	}
 
-	// 创建共享过滤器
-	var recursiveFilter *ResponseFilter
-	if depth > 0 {
-		recursiveFilter = CreateResponseFilterFromExternal()
+	var firstErr error
+	hadSuccess := false
 
-		// [取消] 二次指纹识别无需主动探测（icon和404）
-		// 仅保留被动页面识别，避免重复发包
-		// if recursiveFilter != nil {
-		// 	processor := da.engine.getOrCreateRequestProcessor()
-		// 	recursiveFilter.SetHTTPClient(processor)
-		// }
+	for _, target := range collectedURLs {
+		targetFilter := CreateResponseFilterFromExternal()
+
+		_, err := RunRecursiveScan(
+			context.Background(),
+			[]string{target},
+			depth,
+			layerScanner,
+			targetFilter,
+		)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			logger.Warnf("目标目录扫描失败: %s, %v", target, err)
+			continue
+		}
+		hadSuccess = true
 	}
 
-	// 执行递归扫描
-	// 注意：RunRecursiveScan 的返回值我们在这里可以忽略，因为我们在闭包里收集了完整结果
-	_, err := RunRecursiveScan(
-		context.Background(),
-		collectedURLs,
-		depth,
-		layerScanner,
-		recursiveFilter,
-	)
-
-	if err != nil {
-		return nil, err
+	if !hadSuccess && firstErr != nil {
+		return nil, firstErr
 	}
 
 	// 扫描完成后清空已采集的URL，等待下一轮采集

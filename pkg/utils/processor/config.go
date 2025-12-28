@@ -44,7 +44,6 @@ func GetDefaultConfig() *RequestConfig {
 
 // getDefaultConfig 获取默认配置
 func getDefaultConfig() *RequestConfig {
-	// [修复] 优先使用配置文件值，提供合理的默认值作为后备
 	timeout := 10 * time.Second // 默认超时时间
 
 	retries := 3 // 默认重试次数

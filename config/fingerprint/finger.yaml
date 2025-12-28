@@ -576,7 +576,7 @@ jboss-eap:
 jeecgboot:
   dsl:
     - "contains(body,'.app-loading','.app-loading-title','.app-loading-wrap')"
-    - "contains(body, 'jeecg-boot','polyfill_','casPrefixUrl','load_title')"
+    - "contains(body, 'jeecg-boot','polyfill_','casPrefixUrl')"
     - "contains_all(body, 'absolute','9999999999999','#FFF','Open Sans','load_title')"
 
 jeecms:
@@ -601,8 +601,9 @@ jellyfin:
     - "contains(body, 'content=\"http://jellyfin.org\"')"
 
 jenkins:
+  path: "/jenkins/"
   dsl:
-    - "contains(body, 'Jenkins')"
+    - "contains(body, '/jenkins/static/','jenkins-button')"
     - "icon('/favicon.ico', '23e8c7bd78e8cd826c5a6073b15068b1')"
 
 jetty:

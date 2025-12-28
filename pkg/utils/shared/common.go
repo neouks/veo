@@ -77,6 +77,12 @@ func (v *URLValidator) isSupportedScheme(scheme string) bool {
 // TitleExtractor 标题提取工具
 type TitleExtractor struct{}
 
+var (
+	titleRegex         = regexp.MustCompile(`(?i)<title[^>]*>(.*?)</title>`)
+	numericEntityRegex = regexp.MustCompile(`&#(\d+);`)
+	whitespaceRegex    = regexp.MustCompile(`\s+`)
+)
+
 // NewTitleExtractor 创建标题提取器
 func NewTitleExtractor() *TitleExtractor {
 	return &TitleExtractor{}
@@ -94,9 +100,7 @@ func (e *TitleExtractor) ExtractTitle(body string) string {
 	}
 
 	// 使用正则表达式提取title标签内容
-	titleRegex := `(?i)<title[^>]*>(.*?)</title>`
-	re := regexp.MustCompile(titleRegex)
-	matches := re.FindStringSubmatch(body)
+	matches := titleRegex.FindStringSubmatch(body)
 
 	// 修复：严格的边界检查，防止index out of range panic
 	if len(matches) >= 2 {
@@ -138,13 +142,12 @@ func (e *TitleExtractor) CleanTitle(title string) string {
 	title = strings.ReplaceAll(title, "&trade;", "™")
 
 	// 处理数字实体 &#数字;
-	numericEntityRegex := regexp.MustCompile(`&#(\d+);`)
 	title = numericEntityRegex.ReplaceAllStringFunc(title, func(match string) string {
 		return match // 暂时保持原样，避免复杂解析，后续可引入 html/entity 包
 	})
 
 	// 清理多余空白字符
-	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+	title = whitespaceRegex.ReplaceAllString(title, " ")
 
 	return strings.TrimSpace(title)
 }

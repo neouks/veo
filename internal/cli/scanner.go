@@ -12,7 +12,6 @@ import (
 
 	"veo/internal/core/config"
 	modulepkg "veo/pkg/core/module"
-	"veo/pkg/dirscan"
 	"veo/pkg/fingerprint"
 	reporter "veo/pkg/reporter"
 	"veo/pkg/utils/interfaces"
@@ -37,7 +36,6 @@ type ScanController struct {
 	args              *CLIArgs
 	config            *config.Config
 	requestProcessor  *requests.RequestProcessor
-	urlGenerator      *dirscan.URLGenerator
 	fingerprintEngine *fingerprint.Engine // 指纹识别引擎（用于 finger 模块与 dirscan 二次识别）
 	probedHosts       map[string]bool     // 已探测的主机缓存（用于path探测去重）
 	probedMutex       sync.RWMutex        // 探测缓存锁
@@ -56,9 +54,6 @@ type ScanController struct {
 	displayedURLsMu sync.Mutex
 
 	// 站点过滤器缓存，确保同一站点的过滤器状态（Hash记录）跨递归层级共享
-	siteFilters   map[string]*dirscan.ResponseFilter
-	siteFiltersMu sync.Mutex
-
 	// 收集被过滤的结果（用于报告生成）
 	collectedPrimaryFiltered []interfaces.HTTPResponse
 	collectedStatusFiltered  []interfaces.HTTPResponse
@@ -151,7 +146,6 @@ func NewScanController(args *CLIArgs, cfg *config.Config) *ScanController {
 		args:                   args,
 		config:                 cfg,
 		requestProcessor:       requestProcessor,
-		urlGenerator:           dirscan.NewURLGenerator(),
 		fingerprintEngine:      fpEngine,
 		probedHosts:            make(map[string]bool), // 初始化探测缓存
 		statsDisplay:           statsDisplay,          // 初始化统计显示器
@@ -159,7 +153,6 @@ func NewScanController(args *CLIArgs, cfg *config.Config) *ScanController {
 		reportPath:             strings.TrimSpace(args.Output),
 		wordlistPath:           strings.TrimSpace(args.Wordlist),
 		displayedURLs:          make(map[string]bool),
-		siteFilters:            make(map[string]*dirscan.ResponseFilter),
 	}
 
 	return sc
@@ -172,6 +165,7 @@ func (sc *ScanController) Run() error {
 			logger.Warnf("无法创建实时CSV报告: %v", err)
 		} else {
 			sc.realtimeReporter = realtimeReporter
+			sc.attachRealtimeReporter()
 			logger.Infof("Realtime CSV Report: %s", realtimeReporter.Path())
 			defer func() {
 				if err := realtimeReporter.Close(); err != nil {
@@ -182,6 +176,33 @@ func (sc *ScanController) Run() error {
 	}
 
 	return sc.runActiveMode()
+}
+
+func (sc *ScanController) attachRealtimeReporter() {
+	if sc.realtimeReporter == nil || sc.fingerprintEngine == nil {
+		return
+	}
+
+	hook := func(resp *fingerprint.HTTPResponse, matches []*fingerprint.FingerprintMatch, tags []string) {
+		if resp == nil {
+			return
+		}
+		page := *resp
+		if len(matches) > 0 {
+			page.Fingerprints = convertFingerprintMatches(matches, false)
+		} else {
+			page.Fingerprints = nil
+		}
+		_ = sc.realtimeReporter.WriteResponse(&page)
+	}
+
+	formatter := sc.fingerprintEngine.GetConfig().OutputFormatter
+	switch f := formatter.(type) {
+	case *fingerprint.ConsoleOutputFormatter:
+		f.SetOutputHook(hook)
+	case *fingerprint.JSONOutputFormatter:
+		f.SetOutputHook(hook)
+	}
 }
 
 func (sc *ScanController) runActiveMode() error {
@@ -209,17 +230,38 @@ func (sc *ScanController) runActiveMode() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sigChan := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	defer close(done)
+
+	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
 
 	go func() {
-		select {
-		case <-sigChan:
-			logger.Info("正在停止...")
-			cancel()
-		case <-ctx.Done():
-			return
+		interruptCount := 0
+		for {
+			select {
+			case <-sigChan:
+				interruptCount++
+				if interruptCount == 1 {
+					logger.Info("正在停止...")
+					cancel()
+					go func() {
+						select {
+						case <-done:
+							return
+						case <-time.After(3 * time.Second):
+							logger.Warn("仍未退出，强制结束进程")
+							os.Exit(1)
+						}
+					}()
+				} else {
+					logger.Warn("再次中断，强制结束进程")
+					os.Exit(1)
+				}
+			case <-done:
+				return
+			}
 		}
 	}()
 

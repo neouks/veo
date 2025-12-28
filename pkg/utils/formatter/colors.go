@@ -103,7 +103,6 @@ func FormatStatusCode(statusCode int) string {
 
 // FormatTitle 格式化标题显示
 func FormatTitle(title string) string {
-	// [修复] 检查标题是否已经包含方括号，避免双重方括号问题
 	finalTitle := title
 	if !strings.HasPrefix(title, "[") || !strings.HasSuffix(title, "]") {
 		finalTitle = fmt.Sprintf("[%s]", title)

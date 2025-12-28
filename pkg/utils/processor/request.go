@@ -274,8 +274,8 @@ func (rp *RequestProcessor) processURLsConcurrent(ctx context.Context, urls []st
 						}
 					}
 
-					response := rp.processURLWithContext(ctx, targetURL)
-					rp.updateProcessingStats(response, targetURL, responses, responsesMu, stats)
+					response, reqErr := rp.processURLWithContext(ctx, targetURL)
+					rp.updateProcessingStats(response, targetURL, reqErr, responses, responsesMu, stats)
 
 					if callback != nil && response != nil {
 						callback(response)
@@ -316,11 +316,11 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 }
 
 // processURLWithContext 处理单个URL（可取消）
-func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url string) *interfaces.HTTPResponse {
+func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url string) (*interfaces.HTTPResponse, error) {
 	if ctx != nil {
 		select {
 		case <-ctx.Done():
-			return nil
+			return nil, ctx.Err()
 		default:
 		}
 	}
@@ -332,7 +332,7 @@ func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url strin
 		if ctx != nil {
 			select {
 			case <-ctx.Done():
-				return nil
+				return nil, ctx.Err()
 			default:
 			}
 		}
@@ -343,7 +343,7 @@ func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url strin
 
 		response, err = rp.makeRequest(url)
 		if err == nil {
-			return response
+			return response, nil
 		}
 
 		if !rp.isRetryableError(err) {
@@ -362,13 +362,16 @@ func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url strin
 			logger.Debugf("重试延迟: %v (基础: %v, 抖动: %v)", delay, baseDelay, jitter)
 
 			if !sleepWithContext(ctx, delay) {
-				return nil
+				if ctx != nil {
+					return nil, ctx.Err()
+				}
+				return nil, context.Canceled
 			}
 		}
 	}
 
 	logger.Debug(fmt.Sprintf("请求失败 (重试%d次): %s, 错误: %v", rp.config.MaxRetries, url, err))
-	return nil
+	return nil, err
 }
 
 // HTTP请求相关方法

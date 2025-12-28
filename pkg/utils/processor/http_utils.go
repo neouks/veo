@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,13 +64,18 @@ func (rp *RequestProcessor) processResponseBody(rawBody string) string {
 		truncatedBody := rawBody[:maxSize]
 
 		// 添加截断标记
-		truncatedStr := truncatedBody + "\n...[响应体已截断，原始大小: " +
-			fmt.Sprintf("%d bytes", len(rawBody)) + "]"
+		origSize := strconv.Itoa(len(rawBody))
+		var builder strings.Builder
+		builder.Grow(len(truncatedBody) + len(origSize) + len("\n...[响应体已截断，原始大小:  bytes]"))
+		builder.WriteString(truncatedBody)
+		builder.WriteString("\n...[响应体已截断，原始大小: ")
+		builder.WriteString(origSize)
+		builder.WriteString(" bytes]")
 
 		logger.Debugf("响应体已截断: %d bytes -> %d bytes",
 			len(rawBody), maxSize)
 
-		return truncatedStr
+		return builder.String()
 	}
 
 	return rawBody

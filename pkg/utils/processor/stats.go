@@ -25,6 +25,7 @@ type ProcessingStats struct {
 type StatsUpdater interface {
 	IncrementCompletedRequests()
 	IncrementTimeouts()
+	IncrementErrors()
 	SetTotalRequests(count int64)
 	AddTotalRequests(count int64) // 累加总请求数（用于批量扫描）
 	IncrementCompletedHosts()     // 增加已完成主机数
@@ -56,7 +57,7 @@ func (rp *RequestProcessor) initializeProcessingStats(totalURLs int, maxConcurre
 }
 
 // updateProcessingStats 更新处理统计
-func (rp *RequestProcessor) updateProcessingStats(response *interfaces.HTTPResponse, targetURL string,
+func (rp *RequestProcessor) updateProcessingStats(response *interfaces.HTTPResponse, targetURL string, reqErr error,
 	responses *[]*interfaces.HTTPResponse, responsesMu *sync.Mutex, stats *ProcessingStats) {
 
 	atomic.AddInt64(&stats.ProcessedCount, 1)
@@ -77,16 +78,15 @@ func (rp *RequestProcessor) updateProcessingStats(response *interfaces.HTTPRespo
 	} else {
 		atomic.AddInt64(&stats.FailureCount, 1)
 
-		// 检查是否是超时错误（通过检查错误信息而不是URL）
-		// 注意：这里需要传递错误信息，但当前架构中没有传递错误信息
-		// 暂时使用简单的超时统计逻辑
-		atomic.AddInt64(&stats.TimeoutCount, 1)
-
 		// 修复：失败的请求也应该计入已完成请求数，因为它们已经结束了（无论是超时还是错误）
 		// 否则会导致 Request 进度条永远达不到 100%
 		if rp.statsUpdater != nil {
 			rp.statsUpdater.IncrementCompletedRequests() // 修复点：失败请求也计入完成
-			rp.statsUpdater.IncrementTimeouts()
+			rp.statsUpdater.IncrementErrors()
+			if reqErr != nil && rp.isTimeoutOrCanceledError(reqErr) {
+				atomic.AddInt64(&stats.TimeoutCount, 1)
+				rp.statsUpdater.IncrementTimeouts()
+			}
 		}
 	}
 }

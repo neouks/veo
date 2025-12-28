@@ -46,7 +46,6 @@ func (ad *AuthDetector) LearnFromRequest(req *http.Request, url string) map[stri
 		}
 	}
 
-	// [新增] 检测自定义认证头部（如 X-Access-Token 等）
 	customAuthHeaders := ad.detectCustomAuthHeaders(req)
 	for headerName, headerValue := range customAuthHeaders {
 		authHeaders[headerName] = headerValue

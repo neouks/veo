@@ -99,13 +99,6 @@ func (sc *ScanController) runConcurrentFingerprintWithContext(parentCtx context.
 				resultsMu.Lock()
 				allResults = append(allResults, resList...)
 				resultsMu.Unlock()
-
-				// 实时写入
-				if sc.realtimeReporter != nil {
-					for i := range resList {
-						_ = sc.realtimeReporter.WriteResponse(&resList[i])
-					}
-				}
 			}
 		}
 		close(done)
@@ -122,11 +115,6 @@ func (sc *ScanController) runConcurrentFingerprintWithContext(parentCtx context.
 	activeResults := sc.performActiveProbing(ctx, targets)
 	if len(activeResults) > 0 {
 		allResults = append(allResults, activeResults...)
-		if sc.realtimeReporter != nil {
-			for i := range activeResults {
-				_ = sc.realtimeReporter.WriteResponse(&activeResults[i])
-			}
-		}
 	}
 
 	return allResults, nil
