@@ -77,7 +77,33 @@ func (f *JSONOutputFormatter) FormatMatch(matches []*FingerprintMatch, response 
 }
 
 // FormatNoMatch 实现OutputFormatter接口
-func (f *JSONOutputFormatter) FormatNoMatch(response *HTTPResponse) {}
+func (f *JSONOutputFormatter) FormatNoMatch(response *HTTPResponse) {
+	if response == nil {
+		return
+	}
+
+	if !f.ShouldOutput(response.URL, nil) {
+		return
+	}
+
+	if f.onOutput != nil {
+		f.onOutput(response, nil, nil)
+	}
+
+	res := JSONResult{
+		URL:           response.URL,
+		StatusCode:    response.StatusCode,
+		Title:         response.Title,
+		ContentLength: response.ContentLength,
+		ContentType:   response.ContentType,
+	}
+
+	if data, err := json.Marshal(res); err == nil {
+		fmt.Println(string(data))
+	} else {
+		logger.Errorf("JSON序列化失败: %v", err)
+	}
+}
 
 // ShouldOutput 实现OutputFormatter接口
 func (f *JSONOutputFormatter) ShouldOutput(urlStr string, fingerprintNames []string) bool {

@@ -95,6 +95,7 @@ func getGlobalFilterConfig() *FilterConfig {
 type ResponseFilter struct {
 	config *FilterConfig
 	mu     sync.RWMutex
+	hashMu sync.Mutex
 
 	// 内部过滤状态
 	primaryHashMap   map[string]*interfaces.PageHash
@@ -147,10 +148,13 @@ func (rf *ResponseFilter) SetOnValid(handler func(*interfaces.HTTPResponse)) {
 
 // FilterResponses 过滤响应列表
 func (rf *ResponseFilter) FilterResponses(responses []*interfaces.HTTPResponse) *interfaces.FilterResult {
-	rf.mu.Lock()
-	// 注意：这里移除了 defer rf.mu.Unlock()，改为手动管理锁以优化性能和避免死锁
-
+	rf.mu.RLock()
 	config := rf.config
+	engine := rf.fingerprintEngine
+	client := rf.httpClient
+	onValid := rf.onValid
+	rf.mu.RUnlock()
+
 	result := &interfaces.FilterResult{
 		StatusFilteredPages:  make([]*interfaces.HTTPResponse, 0),
 		PrimaryFilteredPages: make([]*interfaces.HTTPResponse, 0),
@@ -206,28 +210,14 @@ func (rf *ResponseFilter) FilterResponses(responses []*interfaces.HTTPResponse) 
 	}
 	result.SecondaryFiltered = len(step3) - len(result.ValidPages)
 
-	// 收集统计信息 (用于报告)
-	result.InvalidPageHashes = rf.collectHashes(rf.primaryHashMap, config.InvalidPageThreshold)
-	result.SecondaryHashResults = rf.collectHashes(rf.secondaryHashMap, config.SecondaryThreshold)
-
 	// 步骤6: 结果去重 (基于URL)
 	result.ValidPages = rf.deduplicateValidPages(result.ValidPages)
-
-	// 获取指纹引擎引用、配置和HTTP客户端，以便在锁外执行
-	engine := rf.fingerprintEngine
-	client := rf.httpClient
-
-	// 释放锁，避免指纹识别期间阻塞其他请求，并防止死锁
-	rf.mu.Unlock()
 
 	// 步骤7: 指纹识别 (仅对有效结果) - 在锁外执行
 	if engine != nil {
 		rf.performFingerprintOnList(result.ValidPages, engine, client)
 	}
 
-	rf.mu.RLock()
-	onValid := rf.onValid
-	rf.mu.RUnlock()
 	if onValid != nil && len(result.ValidPages) > 0 {
 		for _, page := range result.ValidPages {
 			if page != nil {
@@ -235,6 +225,8 @@ func (rf *ResponseFilter) FilterResponses(responses []*interfaces.HTTPResponse) 
 			}
 		}
 	}
+
+	rf.cleanupNonValidPages(responses, result.ValidPages)
 
 	return result
 }
@@ -273,6 +265,9 @@ func (rf *ResponseFilter) checkSecondaryHash(resp *interfaces.HTTPResponse) bool
 }
 
 func (rf *ResponseFilter) updateAndCheckHash(m map[string]*interfaces.PageHash, hash string, resp *interfaces.HTTPResponse, threshold int) bool {
+	rf.hashMu.Lock()
+	defer rf.hashMu.Unlock()
+
 	if item, exists := m[hash]; exists {
 		item.Count++
 		return item.Count > threshold
@@ -355,11 +350,59 @@ func (rf *ResponseFilter) deduplicateValidPages(pages []*interfaces.HTTPResponse
 	return uniquePages
 }
 
+func (rf *ResponseFilter) cleanupNonValidPages(allPages []*interfaces.HTTPResponse, validPages []*interfaces.HTTPResponse) {
+	if len(allPages) == 0 {
+		return
+	}
+
+	if len(validPages) == 0 {
+		for _, page := range allPages {
+			if page != nil {
+				clearPagePayload(page)
+			}
+		}
+		return
+	}
+
+	validSet := make(map[*interfaces.HTTPResponse]struct{}, len(validPages))
+	for _, page := range validPages {
+		if page == nil {
+			continue
+		}
+		validSet[page] = struct{}{}
+	}
+
+	for _, page := range allPages {
+		if page == nil {
+			continue
+		}
+		if _, ok := validSet[page]; ok {
+			continue
+		}
+		clearPagePayload(page)
+	}
+}
+
+func clearPagePayload(page *interfaces.HTTPResponse) {
+	page.Body = ""
+	page.ResponseBody = ""
+	page.BodyDecoded = false
+	page.ResponseHeaders = nil
+	page.RequestHeaders = nil
+}
+
 // GetInvalidPageHashes 获取无效页面哈希统计
 func (rf *ResponseFilter) GetInvalidPageHashes() []interfaces.PageHash {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.hashMu.Lock()
+	defer rf.hashMu.Unlock()
 	return rf.collectHashes(rf.primaryHashMap, rf.config.InvalidPageThreshold)
+}
+
+// GetSecondaryHashResults 获取二次哈希统计
+func (rf *ResponseFilter) GetSecondaryHashResults() []interfaces.PageHash {
+	rf.hashMu.Lock()
+	defer rf.hashMu.Unlock()
+	return rf.collectHashes(rf.secondaryHashMap, rf.config.SecondaryThreshold)
 }
 
 // ============================================================================
@@ -437,11 +480,15 @@ func (rf *ResponseFilter) performFingerprintRecognition(page *interfaces.HTTPRes
 	// 转换响应格式（解压响应体）
 	// 注意：这里不再需要 convertToFingerprintResponse，因为接口已统一使用 interfaces.HTTPResponse
 	// 但我们需要确保响应体是解压后的
-	decompressedBody := rf.decompressResponseBody(page.Body, page.ResponseHeaders)
+	decompressedBody := page.Body
+	if !page.BodyDecoded {
+		decompressedBody = rf.decompressResponseBody(page.Body, page.ResponseHeaders)
+	}
 
 	// 创建临时响应对象，避免修改原始对象
 	analysisResp := *page
 	analysisResp.Body = decompressedBody
+	analysisResp.BodyDecoded = true
 
 	logger.Debugf("开始识别: %s", page.URL)
 

@@ -20,6 +20,8 @@ type RequestConfig struct {
 	RandomUserAgent bool          // 是否随机使用UserAgent
 	Delay           time.Duration // 请求延迟时间
 	ProxyURL        string        // 上游代理URL
+	// DecompressResponse 控制是否解压/解码响应体
+	DecompressResponse bool
 }
 
 const DefaultMaxRedirects = 3
@@ -63,16 +65,17 @@ func getDefaultConfig() *RequestConfig {
 	}
 
 	return &RequestConfig{
-		Timeout:         timeout,
-		MaxRetries:      retries,
-		UserAgents:      userAgents,
-		MaxBodySize:     10 * 1024 * 1024, // 10MB
-		FollowRedirect:  false,            // 默认不跟随重定向
-		MaxRedirects:    maxRedirects,
-		MaxConcurrent:   maxConcurrent,
-		ConnectTimeout:  connectTimeout,
-		RandomUserAgent: randomUserAgent,
-		Delay:           delay,
+		Timeout:            timeout,
+		MaxRetries:         retries,
+		UserAgents:         userAgents,
+		MaxBodySize:        10 * 1024 * 1024, // 10MB
+		FollowRedirect:     false,            // 默认不跟随重定向
+		MaxRedirects:       maxRedirects,
+		MaxConcurrent:      maxConcurrent,
+		ConnectTimeout:     connectTimeout,
+		RandomUserAgent:    randomUserAgent,
+		Delay:              delay,
+		DecompressResponse: true,
 	}
 }
 

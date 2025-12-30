@@ -65,19 +65,20 @@ func NewScanController(args *CLIArgs, cfg *config.Config) *ScanController {
 	if threads <= 0 {
 		threads = 200
 	}
-	retry := args.Retry
-	if retry <= 0 {
-		retry = 1
+	retry := 1
+	if args.RetrySet {
+		retry = args.Retry
 	}
 	timeout := args.Timeout
 	if timeout <= 0 {
 		timeout = 3
 	}
 	requestConfig := &requests.RequestConfig{
-		Timeout:         time.Duration(timeout) * time.Second,
-		MaxRetries:      retry,
-		MaxConcurrent:   threads,
-		RandomUserAgent: args.RandomUA,
+		Timeout:            time.Duration(timeout) * time.Second,
+		MaxRetries:         retry,
+		MaxConcurrent:      threads,
+		RandomUserAgent:    args.RandomUA,
+		DecompressResponse: true,
 	}
 	requests.ApplyRedirectPolicy(requestConfig)
 

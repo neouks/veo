@@ -85,6 +85,7 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 		StatusFilteredPages:  make([]*interfaces.HTTPResponse, 0),
 	}
 	var resultMu sync.Mutex
+	var firstResponseURL string
 
 	// 3. 执行HTTP请求（带实时过滤回调）
 	actualConcurrency := e.getActualConcurrency()
@@ -95,9 +96,12 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 		logger.Infof("%d URL，Threads: %d，Random UA: true", len(scanURLs), actualConcurrency)
 	}
 
-	responses, err := e.performHTTPRequestsWithCallback(ctx, scanURLs, func(resp *interfaces.HTTPResponse) {
+	totalResponses, err := e.performHTTPRequestsWithCallback(ctx, scanURLs, func(resp *interfaces.HTTPResponse) {
 		if resp == nil {
 			return
+		}
+		if firstResponseURL == "" {
+			firstResponseURL = resp.URL
 		}
 		// 转换并过滤
 		// 注意：这里我们构造一个单元素的切片进行处理
@@ -127,12 +131,12 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 		return nil, fmt.Errorf("HTTP请求执行失败: %v", err)
 	}
 
-	if len(responses) == 0 {
+	if totalResponses == 0 {
 		return nil, ErrNoValidHTTPResponse
 	}
 
-	logger.Debugf("HTTP扫描完成，收到 %d 个响应", len(responses))
-	atomic.StoreInt64(&e.stats.TotalRequests, int64(len(responses)))
+	logger.Debugf("HTTP扫描完成，收到 %d 个响应", totalResponses)
+	atomic.StoreInt64(&e.stats.TotalRequests, totalResponses)
 
 	// 补充：收集无效页面哈希统计 (从过滤器中获取最终状态)
 	if responseFilter != nil {
@@ -143,15 +147,24 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 
 	atomic.StoreInt64(&e.stats.FilteredResults, int64(len(finalFilterResult.ValidPages)))
 	logger.Debugf("过滤完成 - 总响应: %d, 有效结果: %d",
-		len(responses), len(finalFilterResult.ValidPages))
+		totalResponses, len(finalFilterResult.ValidPages))
 
 	// 4. 创建扫描结果
 	endTime := time.Now()
+	target := "unknown"
+	if firstResponseURL != "" {
+		if len(firstResponseURL) > 50 {
+			target = firstResponseURL[:50] + "..."
+		} else {
+			target = firstResponseURL
+		}
+	}
+
 	result := &ScanResult{
-		Target:        e.extractTarget(responses),
+		Target:        target,
 		CollectedURLs: []string{}, // 不再维护收集的URL列表
 		ScanURLs:      scanURLs,
-		Responses:     responses,
+		Responses:     finalFilterResult.ValidPages,
 		FilterResult:  finalFilterResult,
 		StartTime:     startTime,
 		EndTime:       endTime,
@@ -190,18 +203,26 @@ func (e *Engine) generateScanURLs(collectorInstance interfaces.URLCollectorInter
 }
 
 // performHTTPRequestsWithCallback 执行HTTP请求（支持回调）
-func (e *Engine) performHTTPRequestsWithCallback(ctx context.Context, scanURLs []string, callback func(*interfaces.HTTPResponse)) ([]*interfaces.HTTPResponse, error) {
+func (e *Engine) performHTTPRequestsWithCallback(ctx context.Context, scanURLs []string, callback func(*interfaces.HTTPResponse)) (int64, error) {
 	logger.Debug("开始执行HTTP扫描 (Callback模式)")
 
 	// 获取或创建请求处理器
 	processor := e.getOrCreateRequestProcessor()
 
 	// 执行请求
-	responses := processor.ProcessURLsWithCallbackWithContext(ctx, scanURLs, callback)
+	var totalResponses int64
+	processor.ProcessURLsWithCallbackOnlyWithContext(ctx, scanURLs, func(resp *interfaces.HTTPResponse) {
+		if resp != nil {
+			atomic.AddInt64(&totalResponses, 1)
+		}
+		if callback != nil {
+			callback(resp)
+		}
+	})
 
-	atomic.StoreInt64(&e.stats.SuccessRequests, int64(len(responses)))
+	atomic.StoreInt64(&e.stats.SuccessRequests, totalResponses)
 
-	return responses, nil
+	return totalResponses, nil
 }
 
 func buildScanLabel(collectorInstance interfaces.URLCollectorInterface) string {
@@ -250,7 +271,9 @@ func (e *Engine) getOrCreateRequestProcessor() *requests.RequestProcessor {
 	if e.config.RequestTimeout > 0 {
 		reqConfig.Timeout = e.config.RequestTimeout
 	}
-	requests.ApplyRedirectPolicy(reqConfig)
+	reqConfig.DecompressResponse = false
+	reqConfig.FollowRedirect = false
+	reqConfig.MaxRedirects = 0
 
 	e.requestProcessor.UpdateConfig(reqConfig)
 

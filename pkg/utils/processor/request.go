@@ -42,14 +42,16 @@ func NewRequestProcessor(config *RequestConfig) *RequestProcessor {
 
 	// 转换配置到 httpclient.Config
 	clientConfig := &httpclient.Config{
-		Timeout:        config.Timeout,
-		FollowRedirect: config.FollowRedirect,
-		MaxRedirects:   config.MaxRedirects,
-		UserAgent:      "", // 动态设置
-		SkipTLSVerify:  true,
-		ProxyURL:       config.ProxyURL,
-		SameHostOnly:   true, // 默认开启同源限制，后续可通过SetRedirectSameHostOnly修改
-		MaxConcurrent:  config.MaxConcurrent,
+		Timeout:            config.Timeout,
+		FollowRedirect:     config.FollowRedirect,
+		MaxRedirects:       config.MaxRedirects,
+		UserAgent:          "", // 动态设置
+		SkipTLSVerify:      true,
+		ProxyURL:           config.ProxyURL,
+		SameHostOnly:       true, // 默认开启同源限制，后续可通过SetRedirectSameHostOnly修改
+		MaxConcurrent:      config.MaxConcurrent,
+		MaxBodySize:        config.MaxBodySize,
+		DecompressResponse: config.DecompressResponse,
 	}
 
 	processor := &RequestProcessor{
@@ -325,52 +327,14 @@ func (rp *RequestProcessor) processURLWithContext(ctx context.Context, url strin
 		}
 	}
 
-	var response *interfaces.HTTPResponse
-	var err error
-
-	for attempt := 0; attempt <= rp.config.MaxRetries; attempt++ {
-		if ctx != nil {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-			}
-		}
-
-		if attempt > 0 {
-			logger.Debug(fmt.Sprintf("重试 %d/%d: %s", attempt, rp.config.MaxRetries, url))
-		}
-
-		response, err = rp.makeRequest(url)
-		if err == nil {
-			return response, nil
-		}
-
-		if !rp.isRetryableError(err) {
-			logger.Debugf("不可重试的错误，停止重试: %s, 错误: %v", url, err)
-			break
-		}
-
-		if attempt < rp.config.MaxRetries {
-			baseDelay := time.Duration(100*(1<<uint(attempt))) * time.Millisecond
-			if baseDelay > 2*time.Second {
-				baseDelay = 2 * time.Second
-			}
-
-			jitter := time.Duration(rand.Intn(100)) * time.Millisecond
-			delay := baseDelay + jitter
-			logger.Debugf("重试延迟: %v (基础: %v, 抖动: %v)", delay, baseDelay, jitter)
-
-			if !sleepWithContext(ctx, delay) {
-				if ctx != nil {
-					return nil, ctx.Err()
-				}
-				return nil, context.Canceled
-			}
-		}
+	response, err := rp.makeRequest(url)
+	if err == nil {
+		return response, nil
 	}
 
-	logger.Debug(fmt.Sprintf("请求失败 (重试%d次): %s, 错误: %v", rp.config.MaxRetries, url, err))
+	if !rp.isRetryableError(err) {
+		logger.Debugf("不可重试的错误，停止重试: %s, 错误: %v", url, err)
+	}
 	return nil, err
 }
 
@@ -397,13 +361,7 @@ func (rp *RequestProcessor) makeRequestWithHeaders(rawURL string, extraHeaders m
 		return nil, fmt.Errorf("请求失败: %v", err)
 	}
 
-	// 还原 requestHeaders (近似值，用于报告)
-	requestHeaders := make(map[string][]string)
-	for k, v := range headers {
-		requestHeaders[k] = []string{v}
-	}
-
-	return rp.processResponse(rawURL, statusCode, body, respHeaders, requestHeaders, startTime)
+	return rp.processResponse(rawURL, statusCode, body, respHeaders, nil, startTime)
 }
 
 // logRequestError 记录请求错误日志
@@ -434,14 +392,16 @@ func (rp *RequestProcessor) UpdateConfig(config *RequestConfig) {
 	rp.config = config
 
 	clientConfig := &httpclient.Config{
-		Timeout:        config.Timeout,
-		FollowRedirect: config.FollowRedirect,
-		MaxRedirects:   config.MaxRedirects,
-		UserAgent:      "", // 动态设置
-		SkipTLSVerify:  true,
-		ProxyURL:       config.ProxyURL,
-		SameHostOnly:   rp.redirectSameHostOnly,
-		MaxConcurrent:  config.MaxConcurrent,
+		Timeout:            config.Timeout,
+		FollowRedirect:     config.FollowRedirect,
+		MaxRedirects:       config.MaxRedirects,
+		UserAgent:          "", // 动态设置
+		SkipTLSVerify:      true,
+		ProxyURL:           config.ProxyURL,
+		SameHostOnly:       rp.redirectSameHostOnly,
+		MaxConcurrent:      config.MaxConcurrent,
+		MaxBodySize:        config.MaxBodySize,
+		DecompressResponse: config.DecompressResponse,
 	}
 	rp.client = httpclient.New(clientConfig)
 
@@ -586,7 +546,7 @@ func (rp *RequestProcessor) getRandomUserAgent() string {
 
 // MakeRequest 实现 httpclient.HTTPClientInterface 接口
 func (rp *RequestProcessor) MakeRequest(rawURL string) (string, int, error) {
-	resp, err := rp.makeRequestWithHeaders(rawURL, nil)
+	resp, err := rp.makeRequestWithHeadersRetry(context.Background(), rawURL, nil)
 	if err != nil {
 		return "", 0, err
 	}
@@ -598,7 +558,7 @@ func (rp *RequestProcessor) MakeRequest(rawURL string) (string, int, error) {
 
 // MakeRequestWithHeaders 实现 httpclient.HeaderAwareClient 接口
 func (rp *RequestProcessor) MakeRequestWithHeaders(rawURL string, headers map[string]string) (string, int, error) {
-	resp, err := rp.makeRequestWithHeaders(rawURL, headers)
+	resp, err := rp.makeRequestWithHeadersRetry(context.Background(), rawURL, headers)
 	if err != nil {
 		return "", 0, err
 	}
@@ -606,4 +566,57 @@ func (rp *RequestProcessor) MakeRequestWithHeaders(rawURL string, headers map[st
 		return "", 0, fmt.Errorf("empty response")
 	}
 	return resp.ResponseBody, resp.StatusCode, nil
+}
+
+func (rp *RequestProcessor) makeRequestWithHeadersRetry(ctx context.Context, rawURL string, headers map[string]string) (*interfaces.HTTPResponse, error) {
+	maxRetries := rp.config.MaxRetries
+	if maxRetries <= 0 {
+		return rp.makeRequestWithHeaders(rawURL, headers)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+
+		if attempt > 0 {
+			logger.Debug(fmt.Sprintf("重试 %d/%d: %s", attempt, maxRetries, rawURL))
+		}
+
+		resp, err := rp.makeRequestWithHeaders(rawURL, headers)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+
+		if !rp.isRetryableError(err) {
+			logger.Debugf("不可重试的错误，停止重试: %s, 错误: %v", rawURL, err)
+			break
+		}
+
+		if attempt < maxRetries {
+			baseDelay := time.Duration(100*(1<<uint(attempt))) * time.Millisecond
+			if baseDelay > 2*time.Second {
+				baseDelay = 2 * time.Second
+			}
+
+			jitter := time.Duration(rand.Intn(100)) * time.Millisecond
+			delay := baseDelay + jitter
+			logger.Debugf("重试延迟: %v (基础: %v, 抖动: %v)", delay, baseDelay, jitter)
+
+			if !sleepWithContext(ctx, delay) {
+				if ctx != nil {
+					return nil, ctx.Err()
+				}
+				return nil, context.Canceled
+			}
+		}
+	}
+
+	return nil, lastErr
 }

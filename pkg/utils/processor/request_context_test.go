@@ -18,10 +18,11 @@ func TestRequestProcessor_ProcessURLsWithContext_CancelStopsEarly(t *testing.T) 
 	defer srv.Close()
 
 	rp := NewRequestProcessor(&RequestConfig{
-		Timeout:        2 * time.Second,
-		MaxRetries:     0,
-		MaxConcurrent:  1,
-		FollowRedirect: false,
+		Timeout:            2 * time.Second,
+		MaxRetries:         0,
+		MaxConcurrent:      1,
+		FollowRedirect:     false,
+		DecompressResponse: true,
 	})
 
 	urls := make([]string, 0, 50)

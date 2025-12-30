@@ -1787,7 +1787,8 @@ unibox:
 
 用友bip:
   dsl:
-    - "contains(body, 'iuap-apcom-workbench')"
+    - "contains(body, 'iuap-apcom-workbench','hiprint/css/hiprint.css')"
+    - "icon('/favicon.ico', '801c3933347409db03a31b703ae8483b')"
 
 casdoor:
   dsl:
@@ -3156,3 +3157,7 @@ OpenStack:
 熊海内容管理系统SeaCMS:
   dsl:
     - "contains(body, '欢迎使用 SEACMS','http://www.isea','seacms-style.css')"
+
+华为VPN:
+  dsl:
+    - "contains(body, '>MAC地址绑定认证的用户，请使用IE浏览器并','?portalindex=0&res=1','form.userIpMac.value = document.getElementById(\"userIpMacVal\").value')"

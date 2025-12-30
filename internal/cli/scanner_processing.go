@@ -67,6 +67,10 @@ func (sc *ScanController) processResponseBody(resp *interfaces.HTTPResponse) str
 		return ""
 	}
 
+	if resp.BodyDecoded {
+		return resp.ResponseBody
+	}
+
 	rawBody := resp.ResponseBody
 
 	// 步骤1: 检查Content-Encoding并解压缩

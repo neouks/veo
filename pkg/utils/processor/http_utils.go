@@ -16,12 +16,16 @@ import (
 
 // getDefaultHeaders 获取默认请求头（集成认证头部）
 func (rp *RequestProcessor) getDefaultHeaders() map[string]string {
+	acceptEncoding := "gzip, deflate"
+	if rp.config != nil && !rp.config.DecompressResponse {
+		acceptEncoding = "identity"
+	}
 	// 获取基础头部
 	headers := map[string]string{
 		"User-Agent":                rp.getRandomUserAgent(), // 使用随机UserAgent
 		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Accept-Language":           "zh-CN,zh;q=0.9,en;q=0.8",
-		"Accept-Encoding":           "gzip, deflate",
+		"Accept-Encoding":           acceptEncoding,
 		"Connection":                "keep-alive",
 		"Upgrade-Insecure-Requests": "1",
 		"Cookie":                    "rememberMe=1",
@@ -86,16 +90,25 @@ func (rp *RequestProcessor) processResponse(url string, statusCode int, body str
 	// 响应体截断处理
 	finalBody := rp.processResponseBody(body)
 
-	// 提取信息
-	title := rp.extractTitleSafely(url, finalBody)
+	// 提取 Content-Encoding
+	var contentEncoding string
+	if enc, ok := responseHeaders["Content-Encoding"]; ok && len(enc) > 0 {
+		contentEncoding = strings.ToLower(strings.TrimSpace(enc[0]))
+	}
+
+	decodedBody := rp.config.DecompressResponse || contentEncoding == ""
+	title := ""
+	if decodedBody {
+		title = rp.extractTitleSafely(url, finalBody)
+	}
 	contentLength := int64(len(finalBody))
 
 	// 提取 Content-Type
 	contentType := "unknown"
 	if ct, ok := responseHeaders["Content-Type"]; ok && len(ct) > 0 {
 		contentType = ct[0]
-		if idx := strings.Index(contentType, ";"); idx != -1 {
-			contentType = contentType[:idx]
+		if v, _, found := strings.Cut(contentType, ";"); found {
+			contentType = v
 		}
 		contentType = strings.TrimSpace(contentType)
 	}
@@ -119,6 +132,7 @@ func (rp *RequestProcessor) processResponse(url string, statusCode int, body str
 		Body:            finalBody,
 		ResponseHeaders: responseHeaders,
 		RequestHeaders:  requestHeaders,
+		BodyDecoded:     decodedBody || rp.GetModuleContext() == "dirscan",
 		Server:          server,
 		IsDirectory:     rp.isDirectoryURL(url),
 		Length:          contentLength,

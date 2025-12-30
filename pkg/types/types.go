@@ -17,6 +17,7 @@ type HTTPResponse struct {
 	Body            string              `json:"body"`
 	ResponseHeaders map[string][]string `json:"response_headers"`
 	RequestHeaders  map[string][]string `json:"request_headers"`
+	BodyDecoded     bool                `json:"-"`
 	Server          string              `json:"server"`
 	IsDirectory     bool                `json:"is_directory"`
 	Length          int64               `json:"length"` // Used for reporting

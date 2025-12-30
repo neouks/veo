@@ -35,17 +35,18 @@ type HeaderAwareClient interface {
 
 // Config HTTP客户端配置结构
 type Config struct {
-	Timeout        time.Duration     // 请求超时时间
-	FollowRedirect bool              // 是否跟随重定向
-	MaxRedirects   int               // 最大重定向次数
-	UserAgent      string            // User-Agent
-	SkipTLSVerify  bool              // 跳过TLS证书验证
-	TLSTimeout     time.Duration     // TLS握手超时
-	ProxyURL       string            // 上游代理URL
-	CustomHeaders  map[string]string // 自定义HTTP头部
-	SameHostOnly   bool              // 重定向仅限同主机
-	MaxBodySize    int               // 最大响应体大小(字节)
-	MaxConcurrent  int               // 最大并发连接数
+	Timeout            time.Duration     // 请求超时时间
+	FollowRedirect     bool              // 是否跟随重定向
+	MaxRedirects       int               // 最大重定向次数
+	UserAgent          string            // User-Agent
+	SkipTLSVerify      bool              // 跳过TLS证书验证
+	TLSTimeout         time.Duration     // TLS握手超时
+	ProxyURL           string            // 上游代理URL
+	CustomHeaders      map[string]string // 自定义HTTP头部
+	SameHostOnly       bool              // 重定向仅限同主机
+	MaxBodySize        int               // 最大响应体大小(字节)
+	MaxConcurrent      int               // 最大并发连接数
+	DecompressResponse bool              // 是否解压/解码响应体
 }
 
 // DefaultConfig 获取默认HTTP客户端配置（安全扫描优化版）
@@ -56,14 +57,15 @@ func DefaultConfig() *Config {
 	}
 
 	return &Config{
-		Timeout:        10 * time.Second,
-		FollowRedirect: true, // 默认跟随重定向
-		MaxRedirects:   5,    // 最大5次重定向
-		UserAgent:      ua,
-		SkipTLSVerify:  true,             // 网络安全扫描工具常用设置
-		TLSTimeout:     5 * time.Second,  // TLS握手超时
-		MaxBodySize:    10 * 1024 * 1024, // 10MB
-		MaxConcurrent:  1000,
+		Timeout:            10 * time.Second,
+		FollowRedirect:     true, // 默认跟随重定向
+		MaxRedirects:       5,    // 最大5次重定向
+		UserAgent:          ua,
+		SkipTLSVerify:      true,             // 网络安全扫描工具常用设置
+		TLSTimeout:         5 * time.Second,  // TLS握手超时
+		MaxBodySize:        10 * 1024 * 1024, // 10MB
+		MaxConcurrent:      1000,
+		DecompressResponse: true,
 	}
 }
 
@@ -71,13 +73,14 @@ func DefaultConfig() *Config {
 
 // Client 通用HTTP客户端实现
 type Client struct {
-	client         *fasthttp.Client
-	timeout        time.Duration     // 单次请求超时
-	followRedirect bool              // 是否跟随重定向
-	maxRedirects   int               // 最大重定向次数
-	userAgent      string            // User-Agent
-	customHeaders  map[string]string // 自定义HTTP头部
-	sameHostOnly   bool              // 重定向仅限同主机
+	client             *fasthttp.Client
+	timeout            time.Duration     // 单次请求超时
+	followRedirect     bool              // 是否跟随重定向
+	maxRedirects       int               // 最大重定向次数
+	userAgent          string            // User-Agent
+	customHeaders      map[string]string // 自定义HTTP头部
+	sameHostOnly       bool              // 重定向仅限同主机
+	decompressResponse bool
 }
 
 // New 创建配置化的HTTP客户端（支持TLS）
@@ -87,11 +90,16 @@ func New(config *Config) *Client {
 	}
 
 	// 创建 fasthttp 客户端
+	waitTimeout := config.Timeout
+	if waitTimeout <= 0 {
+		waitTimeout = 3 * time.Second
+	}
 	fastClient := &fasthttp.Client{
 		Name:                config.UserAgent,
 		ReadTimeout:         config.Timeout,
 		WriteTimeout:        config.Timeout,
 		MaxConnsPerHost:     config.MaxConcurrent,
+		MaxConnWaitTimeout:  waitTimeout,
 		MaxIdleConnDuration: 30 * time.Second,
 		MaxResponseBodySize: config.MaxBodySize,
 		ReadBufferSize:      16384, // 16KB
@@ -120,13 +128,14 @@ func New(config *Config) *Client {
 	}
 
 	return &Client{
-		client:         fastClient,
-		timeout:        config.Timeout,
-		followRedirect: config.FollowRedirect,
-		maxRedirects:   config.MaxRedirects,
-		userAgent:      config.UserAgent,
-		customHeaders:  config.CustomHeaders,
-		sameHostOnly:   config.SameHostOnly,
+		client:             fastClient,
+		timeout:            config.Timeout,
+		followRedirect:     config.FollowRedirect,
+		maxRedirects:       config.MaxRedirects,
+		userAgent:          config.UserAgent,
+		customHeaders:      config.CustomHeaders,
+		sameHostOnly:       config.SameHostOnly,
+		decompressResponse: config.DecompressResponse,
 	}
 }
 
@@ -172,6 +181,9 @@ func (c *Client) executeRequest(rawURL string, customHeaders map[string]string) 
 }
 
 func (c *Client) executeRequestFull(rawURL string, customHeaders map[string]string) (body string, statusCode int, headers map[string][]string, err error) {
+	if !c.followRedirect {
+		return c.doRequestInternal(rawURL, customHeaders)
+	}
 	// 构造重定向配置
 	redirectConfig := &redirect.Config{
 		MaxRedirects:   c.maxRedirects,
@@ -253,14 +265,13 @@ func (c *Client) doRequestInternal(rawURL string, customHeaders map[string]strin
 	// Body Decompression (if needed) & Charset Decoding
 	contentEncoding := string(resp.Header.Peek("Content-Encoding"))
 	var respBody []byte
-	if contentEncoding != "" {
-		respBody = shared.DecompressByEncoding(resp.Body(), contentEncoding)
-	} else {
-		respBody = resp.Body()
+	respBody = resp.Body()
+	if c.decompressResponse && contentEncoding != "" {
+		respBody = shared.DecompressByEncoding(respBody, contentEncoding)
 	}
 
 	contentType := string(resp.Header.Peek("Content-Type"))
-	if shouldDecodeBody(contentType, respBody) {
+	if (c.decompressResponse || contentEncoding == "") && shouldDecodeBody(contentType, respBody) {
 		if decoded, ok := decodeToUTF8(respBody, contentType); ok {
 			respBody = decoded
 		}

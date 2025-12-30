@@ -28,7 +28,9 @@ type CLIArgs struct {
 
 	Threads int // 统一线程并发数量 (-t, --threads)
 	Retry   int // 重试次数 (--retry)
-	Timeout int // 全局超时时间 (--timeout)
+	// RetrySet 仅当用户通过CLI传入 --retry 时为 true
+	RetrySet bool
+	Timeout  int // 全局超时时间 (--timeout)
 
 	Output string // 报告文件输出路径 (-o, --output)
 	Stats  bool   // 启用实时扫描进度统计显示 (--stats)
@@ -132,6 +134,7 @@ func ParseCLIArgs() *CLIArgs {
 		RandomUA: *randomUAFlag,
 		Depth:    *depth,
 		DepthSet: flagProvided("depth"),
+		RetrySet: flagProvided("retry"),
 
 		UpdateRules: *updateRules,
 	}
@@ -366,7 +369,7 @@ func applyArgsToConfig(args *CLIArgs) {
 			requestConfig.Threads = 200
 		}
 
-		if args.Retry > 0 {
+		if args.RetrySet {
 			requestConfig.Retry = args.Retry
 			logger.Debugf("全局配置：重试次数设置为 %d", requestConfig.Retry)
 		} else if requestConfig.Retry <= 0 {

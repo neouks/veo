@@ -11,9 +11,39 @@ import (
 	"veo/pkg/fingerprint"
 	"veo/pkg/utils/interfaces"
 	"veo/pkg/utils/logger"
+	requests "veo/pkg/utils/processor"
 )
 
 func (sc *ScanController) runFingerprintModuleWithContext(ctx context.Context, targets []string) ([]interfaces.HTTPResponse, error) {
+	originalDecompress := true
+	originalFollowRedirect := false
+	originalMaxRedirects := 0
+	if cfg := sc.requestProcessor.GetConfig(); cfg != nil {
+		originalDecompress = cfg.DecompressResponse
+		originalFollowRedirect = cfg.FollowRedirect
+		originalMaxRedirects = cfg.MaxRedirects
+
+		needsUpdate := !cfg.DecompressResponse || !cfg.FollowRedirect || cfg.MaxRedirects != requests.DefaultMaxRedirects
+		if needsUpdate {
+			updated := *cfg
+			updated.DecompressResponse = true
+			requests.ApplyRedirectPolicy(&updated)
+			sc.requestProcessor.UpdateConfig(&updated)
+		}
+	}
+
+	defer func() {
+		if cfg := sc.requestProcessor.GetConfig(); cfg != nil {
+			if cfg.DecompressResponse != originalDecompress || cfg.FollowRedirect != originalFollowRedirect || cfg.MaxRedirects != originalMaxRedirects {
+				updated := *cfg
+				updated.DecompressResponse = originalDecompress
+				updated.FollowRedirect = originalFollowRedirect
+				updated.MaxRedirects = originalMaxRedirects
+				sc.requestProcessor.UpdateConfig(&updated)
+			}
+		}
+	}()
+
 	fmt.Println()
 	if sc.fingerprintEngine != nil {
 		summary := sc.fingerprintEngine.GetLoadedSummaryString()
