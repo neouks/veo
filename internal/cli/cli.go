@@ -33,17 +33,16 @@ func Execute() {
 
 	displayStartupInfo(args)
 
-	var err error
-	app, err = initializeApp(args)
+	app, err := initializeApp(args)
 	if err != nil {
 		logger.Fatalf("初始化应用程序失败: %v", err)
 	}
 
 	if args.Listen {
-		if err := startApplication(args); err != nil {
+		if err := app.startApplication(); err != nil {
 			logger.Fatalf("启动应用程序失败: %v", err)
 		}
-		waitForSignal()
+		waitForSignal(app)
 	} else {
 		if err := runActiveScanMode(args); err != nil {
 			logger.Fatalf("主动扫描失败: %v", err)
@@ -54,14 +53,11 @@ func Execute() {
 type CLIApp struct {
 	proxy             *proxy.Proxy
 	collector         *dirscan.Collector
-	dirscanModule     *dirscan.DirscanModule
 	fingerprintAddon  *fingerprint.FingerprintAddon
 	authLearningAddon *AuthLearningAddon
 	proxyStarted      bool
 	args              *CLIArgs
 }
-
-var app *CLIApp
 
 // initializeApp 初始化应用程序（被动代理模式/通用初始化）
 func initializeApp(args *CLIArgs) (*CLIApp, error) {
@@ -74,22 +70,9 @@ func initializeApp(args *CLIArgs) (*CLIApp, error) {
 
 	// 只在启用dirscan模块时创建collector和相关组件
 	var collectorInstance *dirscan.Collector
-	var dirscanModule *dirscan.DirscanModule
-
 	if args.HasModule(moduleDirscan) {
 		logger.Debug("启用目录扫描模块，创建相关组件...")
-
 		collectorInstance = dirscan.NewCollector()
-
-		dirscanModule, err = dirscan.NewDirscanModule(collectorInstance)
-		if err != nil {
-			return nil, fmt.Errorf("创建目录扫描模块失败: %v", err)
-		}
-
-		// 应用全局代理设置到目录扫描模块
-		if proxyCfg := config.GetProxyConfig(); proxyCfg.UpstreamProxy != "" {
-			dirscanModule.SetProxy(proxyCfg.UpstreamProxy)
-		}
 	} else {
 		logger.Debug("未启用目录扫描模块，跳过collector和consoleManager创建")
 	}
@@ -111,7 +94,6 @@ func initializeApp(args *CLIArgs) (*CLIApp, error) {
 	app := &CLIApp{
 		proxy:             proxyServer,
 		collector:         collectorInstance,
-		dirscanModule:     dirscanModule,
 		fingerprintAddon:  fingerprintAddon,
 		authLearningAddon: authLearningAddon,
 		proxyStarted:      false,
@@ -136,12 +118,7 @@ func createProxy() (*proxy.Proxy, error) {
 }
 
 func createFingerprintAddon() (*fingerprint.FingerprintAddon, error) {
-	addon, err := fingerprint.CreateDefaultAddon()
-	if err != nil {
-		return nil, err
-	}
-	fingerprint.SetGlobalAddon(addon)
-	return addon, nil
+	return fingerprint.CreateDefaultAddon()
 }
 
 func createAuthLearningAddon() *AuthLearningAddon {
@@ -224,26 +201,25 @@ func (app *CLIApp) StopProxy() error {
 }
 
 // startApplication 启动被动代理模式应用
-func startApplication(args *CLIArgs) error {
+func (app *CLIApp) startApplication() error {
 	// 启动代理服务器（并添加Addon）
 	if err := app.StartProxy(); err != nil {
 		return fmt.Errorf("启动代理服务器失败: %v", err)
 	}
 
 	// 启动指纹识别模块
-	if args.HasModule(moduleFinger) && app.fingerprintAddon != nil {
-		fingerprint.SetGlobalAddon(app.fingerprintAddon)
+	if app.args.HasModule(moduleFinger) && app.fingerprintAddon != nil {
 		app.fingerprintAddon.Enable()
 
 		engine := app.fingerprintAddon.GetEngine()
 		if engine != nil {
 			engine.GetConfig().ShowSnippet = true
 
-			snippetEnabled := args.VeryVerbose
-			ruleEnabled := args.Verbose || args.VeryVerbose
+			snippetEnabled := app.args.VeryVerbose
+			ruleEnabled := app.args.Verbose || app.args.VeryVerbose
 
 			var outputFormatter fingerprint.OutputFormatter
-			if args.JSONOutput {
+			if app.args.JSONOutput {
 				outputFormatter = fingerprint.NewJSONOutputFormatter()
 			} else {
 				outputFormatter = fingerprint.NewConsoleOutputFormatter(
@@ -260,18 +236,14 @@ func startApplication(args *CLIArgs) error {
 		logger.Debug("指纹识别模块启动成功")
 	}
 
-	// 启动目录扫描模块
-	if args.HasModule(moduleDirscan) && app.dirscanModule != nil {
-		if err := app.dirscanModule.Start(); err != nil {
-			logger.Errorf("Failed to start dirscan module: %v", err)
-		} else {
-			logger.Debug("目录扫描模块启动成功")
-		}
+	if app.args.HasModule(moduleDirscan) && app.collector != nil {
+		app.collector.EnableCollection()
+		logger.Debug("目录扫描采集器已启用")
 	}
 
 	// 模块间依赖注入：为指纹主动探测注入统一HTTP客户端
 	if app.fingerprintAddon != nil {
-		injectFingerprintHTTPClient(app.fingerprintAddon, args.Shiro)
+		injectFingerprintHTTPClient(app.fingerprintAddon, app.args.Shiro)
 	}
 
 	logger.Debug("模块启动和依赖注入完成")
@@ -350,7 +322,7 @@ func closePassiveRealtimeReporter(realtimeReporter *reporter.RealtimeCSVReporter
 }
 
 // waitForSignal 等待中断信号或用户输入
-func waitForSignal() {
+func waitForSignal(app *CLIApp) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -375,12 +347,10 @@ func waitForSignal() {
 		case sig := <-sigChan:
 			fmt.Println()
 			logger.Info(sig)
-			cleanup()
+			cleanup(app)
 			return
 		case <-inputChan:
-			if app != nil {
-				app.triggerScan()
-			}
+			app.triggerScan()
 		}
 	}
 }
@@ -389,7 +359,7 @@ func waitForSignal() {
 func (app *CLIApp) triggerScan() {
 	logger.Info("Scan triggered by user...")
 
-	if app.dirscanModule == nil || app.collector == nil {
+	if app.collector == nil {
 		logger.Warn("Dirscan module is not enabled, scan cannot be started")
 		return
 	}
@@ -440,14 +410,8 @@ func (app *CLIApp) triggerScan() {
 }
 
 // cleanup 清理资源
-func cleanup() {
-	if app != nil {
-		if app.dirscanModule != nil {
-			if err := app.dirscanModule.Stop(); err != nil {
-				logger.Errorf("Failed to stop dirscan module: %v", err)
-			}
-		}
-
+func cleanup(app *CLIApp) {
+	if app != nil && app.proxyStarted {
 		if err := app.StopProxy(); err != nil {
 			logger.Errorf("Failed to stop proxy server: %v", err)
 		}

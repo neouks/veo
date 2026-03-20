@@ -296,17 +296,6 @@ func (fa *FingerprintAddon) extractTitleFromHTML(body string) string {
 	return extractor.ExtractTitle(body)
 }
 
-// 全局实例管理
-
-var (
-	globalFingerprintAddon *FingerprintAddon
-)
-
-// SetGlobalAddon 设置全局指纹识别插件实例
-func SetGlobalAddon(addon *FingerprintAddon) {
-	globalFingerprintAddon = addon
-}
-
 // CreateDefaultAddon 创建默认配置的插件
 func CreateDefaultAddon() (*FingerprintAddon, error) {
 	config := getDefaultConfig()
