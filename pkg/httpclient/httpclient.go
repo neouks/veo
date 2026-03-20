@@ -293,9 +293,9 @@ func remoteIPFromAddr(addr net.Addr) string {
 func (c *Client) handleRequestError(err error) error {
 	errStr := err.Error()
 	if strings.Contains(errStr, "tls:") || strings.Contains(errStr, "x509:") {
-		return fmt.Errorf("TLS握手失败: %v", err)
+		return fmt.Errorf("TLS handshake failed: %v", err)
 	}
-	return fmt.Errorf("请求失败: %v", err)
+	return fmt.Errorf("request failed: %v", err)
 }
 
 func encodeHashInURL(rawURL string) string {
@@ -346,14 +346,14 @@ func FasthttpDialerFactory(proxyURL string, connectTimeout time.Duration) fastht
 
 	u, err := url.Parse(proxyURL)
 	if err != nil {
-		logger.Warnf("无效的代理URL: %s, 错误: %v", proxyURL, err)
+		logger.Warnf("Invalid proxy URL: %s, error: %v", proxyURL, err)
 		return nil
 	}
 
 	if strings.HasPrefix(proxyURL, "socks5") {
 		dialer, err := xproxy.FromURL(u, xproxy.Direct)
 		if err != nil {
-			logger.Warnf("SOCKS5代理初始化失败: %v", err)
+			logger.Warnf("Failed to initialize SOCKS5 proxy: %v", err)
 			return nil
 		}
 
@@ -405,7 +405,7 @@ func FasthttpDialerFactory(proxyURL string, connectTimeout time.Duration) fastht
 
 			if !strings.Contains(statusLine, "200") {
 				conn.Close()
-				return nil, fmt.Errorf("代理连接失败: %s", strings.TrimSpace(statusLine))
+				return nil, fmt.Errorf("proxy connection failed: %s", strings.TrimSpace(statusLine))
 			}
 
 			for {

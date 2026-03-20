@@ -354,7 +354,7 @@ func (f *JSONOutputFormatter) outputResult(response *HTTPResponse, matches []*Fi
 func (f *JSONOutputFormatter) emitJSONResult(result JSONResult) {
 	data, err := json.Marshal(result)
 	if err != nil {
-		logger.Errorf("JSON序列化失败: %v", err)
+		logger.Errorf("Failed to marshal JSON: %v", err)
 		return
 	}
 	fmt.Println(string(data))

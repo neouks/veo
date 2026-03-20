@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -99,7 +100,7 @@ func initializeApp(args *CLIArgs) (*CLIApp, error) {
 		logger.Debug("创建指纹识别插件...")
 		fingerprintAddon, err = createFingerprintAddon()
 		if err != nil {
-			logger.Warnf("指纹识别插件初始化失败: %v", err)
+			logger.Warnf("Failed to initialize fingerprint addon: %v", err)
 		}
 	}
 
@@ -262,7 +263,7 @@ func startApplication(args *CLIArgs) error {
 	// 启动目录扫描模块
 	if args.HasModule(moduleDirscan) && app.dirscanModule != nil {
 		if err := app.dirscanModule.Start(); err != nil {
-			logger.Errorf("启动目录扫描模块失败: %v", err)
+			logger.Errorf("Failed to start dirscan module: %v", err)
 		} else {
 			logger.Debug("目录扫描模块启动成功")
 		}
@@ -316,6 +317,38 @@ func injectFingerprintHTTPClient(addon *fingerprint.FingerprintAddon, shiro bool
 	logger.Debug("统一的RequestProcessor客户端已注入到指纹识别模块")
 }
 
+func (app *CLIApp) newPassiveScanController() *ScanController {
+	controller := NewScanController(app.args, config.GetConfig())
+	if app.fingerprintAddon != nil {
+		if engine := app.fingerprintAddon.GetEngine(); engine != nil {
+			controller.fingerprintEngine = engine
+		}
+	}
+	if strings.TrimSpace(app.args.Output) == "" {
+		return controller
+	}
+
+	realtimeReporter, err := reporter.NewRealtimeCSVReporter(app.args.Output)
+	if err != nil {
+		logger.Errorf("Failed to create realtime CSV report: %v", err)
+		return controller
+	}
+
+	controller.realtimeReporter = realtimeReporter
+	return controller
+}
+
+func closePassiveRealtimeReporter(realtimeReporter *reporter.RealtimeCSVReporter) {
+	if realtimeReporter == nil {
+		return
+	}
+	if err := realtimeReporter.Close(); err != nil {
+		logger.Errorf("Failed to close realtime CSV report: %v", err)
+		return
+	}
+	logger.Infof("Report Output Success: %s", realtimeReporter.Path())
+}
+
 // waitForSignal 等待中断信号或用户输入
 func waitForSignal() {
 	sigChan := make(chan os.Signal, 1)
@@ -335,7 +368,7 @@ func waitForSignal() {
 		}
 	}()
 
-	logger.Info("按 [Enter] 键开始扫描收集到的目标...")
+	logger.Info("Press [Enter] to scan collected targets...")
 
 	for {
 		select {
@@ -354,21 +387,16 @@ func waitForSignal() {
 
 // triggerScan 触发被动模式下的目录扫描
 func (app *CLIApp) triggerScan() {
-	logger.Info("用户触发扫描...")
+	logger.Info("Scan triggered by user...")
 
-	if app.dirscanModule == nil {
-		logger.Warn("目录扫描模块未启用，无法执行扫描")
+	if app.dirscanModule == nil || app.collector == nil {
+		logger.Warn("Dirscan module is not enabled, scan cannot be started")
 		return
 	}
 
-	addon := app.dirscanModule.GetAddon()
-	if addon == nil {
-		logger.Error("目录扫描Addon未初始化")
-		return
-	}
-
-	if len(addon.GetCollectedURLs()) == 0 {
-		logger.Warn("没有收集到待扫描的URL，请先浏览目标网站")
+	targets := app.collector.GetURLMap()
+	if len(targets) == 0 {
+		logger.Warn("No URLs collected for scanning, please browse the target site first")
 		return
 	}
 
@@ -376,9 +404,8 @@ func (app *CLIApp) triggerScan() {
 	if app.args.DepthSet {
 		depth = app.args.Depth
 	}
-	addon.SetDepth(depth)
 	if depth > 0 {
-		logger.Infof("被动扫描递归深度设置为: %d", depth)
+		logger.Infof("Passive scan recursion depth set to: %d", depth)
 	}
 
 	// 暂停指纹识别插件，避免扫描流量干扰
@@ -387,23 +414,21 @@ func (app *CLIApp) triggerScan() {
 		logger.Debug("指纹识别插件已暂停")
 	}
 
-	logger.Info("开始执行目录扫描...")
-	result, err := addon.TriggerScan()
+	controller := app.newPassiveScanController()
+	defer closePassiveRealtimeReporter(controller.realtimeReporter)
+
+	collectedURLs := make([]string, 0, len(targets))
+	for target := range targets {
+		collectedURLs = append(collectedURLs, target)
+	}
+
+	logger.Info("Starting dirscan...")
+	result, err := controller.runDirscanModule(context.Background(), collectedURLs)
 	if err != nil {
-		logger.Errorf("扫描执行失败: %v", err)
+		logger.Errorf("Scan execution failed: %v", err)
 	} else {
-		if result != nil && result.FilterResult != nil {
-			showSnippet := app.args.VeryVerbose
-			showRule := app.args.Verbose || app.args.VeryVerbose
-
-			for _, page := range result.FilterResult.ValidPages {
-				if page != nil {
-					printHTTPResponseResult(page, showSnippet, showRule)
-				}
-			}
-		}
-
-		logger.Infof("扫描完成，发现 %d 个有效结果", len(result.FilterResult.ValidPages))
+		app.collector.ClearURLMap()
+		logger.Infof("Scan completed, found %d valid results", len(result))
 	}
 
 	if app.fingerprintAddon != nil {
@@ -411,27 +436,7 @@ func (app *CLIApp) triggerScan() {
 		logger.Debug("指纹识别插件已恢复")
 	}
 
-	if app.args.Output != "" {
-		realtimeReporter, err := reporter.NewRealtimeCSVReporter(app.args.Output)
-		if err != nil {
-			logger.Errorf("创建实时CSV报告失败: %v", err)
-		} else {
-			if result != nil && result.FilterResult != nil {
-				for _, page := range result.FilterResult.ValidPages {
-					if page != nil {
-						_ = realtimeReporter.WriteResponse(page)
-					}
-				}
-			}
-			if cerr := realtimeReporter.Close(); cerr != nil {
-				logger.Errorf("关闭实时CSV报告失败: %v", cerr)
-			} else {
-				logger.Infof("Report Output Success: %s", realtimeReporter.Path())
-			}
-		}
-	}
-
-	logger.Info("等待下一轮收集，按 [Enter] 键再次扫描...")
+	logger.Info("Waiting for the next collection round, press [Enter] to scan again...")
 }
 
 // cleanup 清理资源
@@ -439,12 +444,12 @@ func cleanup() {
 	if app != nil {
 		if app.dirscanModule != nil {
 			if err := app.dirscanModule.Stop(); err != nil {
-				logger.Errorf("停止目录扫描模块失败: %v", err)
+				logger.Errorf("Failed to stop dirscan module: %v", err)
 			}
 		}
 
 		if err := app.StopProxy(); err != nil {
-			logger.Errorf("停止代理服务器失败: %v", err)
+			logger.Errorf("Failed to stop proxy server: %v", err)
 		}
 	}
 

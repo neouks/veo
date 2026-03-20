@@ -49,7 +49,7 @@ func (rm *RuleManager) LoadRules(rulesPath string) error {
 	// 检查路径是文件还是目录
 	fileInfo, err := os.Stat(rulesPath)
 	if err != nil {
-		return fmt.Errorf("规则路径不存在: %v", err)
+		return fmt.Errorf("rules path does not exist: %v", err)
 	}
 
 	var yamlFiles []string
@@ -60,7 +60,7 @@ func (rm *RuleManager) LoadRules(rulesPath string) error {
 
 		files, err := os.ReadDir(rulesPath)
 		if err != nil {
-			return fmt.Errorf("读取目录失败: %v", err)
+			return fmt.Errorf("failed to read directory: %v", err)
 		}
 
 		for _, file := range files {
@@ -70,7 +70,7 @@ func (rm *RuleManager) LoadRules(rulesPath string) error {
 		}
 
 		if len(yamlFiles) == 0 {
-			return fmt.Errorf("目录中没有找到YAML文件: %s", rulesPath)
+			return fmt.Errorf("no YAML files found in directory: %s", rulesPath)
 		}
 
 		logger.Debugf("找到 %d 个YAML文件", len(yamlFiles))
@@ -85,7 +85,7 @@ func (rm *RuleManager) LoadRules(rulesPath string) error {
 	for _, yamlFile := range yamlFiles {
 		count, err := rm.loadSingleYAMLFile(yamlFile)
 		if err != nil {
-			logger.Warnf("加载指纹库文件失败: %s, 错误: %v", filepath.Base(yamlFile), err)
+			logger.Warnf("Failed to load fingerprint rule file: %s, error: %v", filepath.Base(yamlFile), err)
 			continue
 		}
 		summary := fmt.Sprintf("%s:%d", filepath.Base(yamlFile), count)
@@ -138,13 +138,13 @@ func (rm *RuleManager) loadSingleYAMLFile(filePath string) (int, error) {
 	// 读取YAML文件
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return 0, fmt.Errorf("读取文件失败: %v", err)
+		return 0, fmt.Errorf("failed to read file: %v", err)
 	}
 
 	// 解析YAML
 	var rulesMap map[string]*FingerprintRule
 	if err := yaml.Unmarshal(data, &rulesMap); err != nil {
-		return 0, fmt.Errorf("解析YAML失败: %v", err)
+		return 0, fmt.Errorf("failed to parse YAML: %v", err)
 	}
 
 	// 处理规则
@@ -160,7 +160,7 @@ func (rm *RuleManager) loadSingleYAMLFile(filePath string) (int, error) {
 
 			// 检查规则ID冲突
 			if existingRule, exists := rm.rules[ruleName]; exists {
-				logger.Warnf("规则ID冲突: %s (文件: %s 覆盖了之前的规则)",
+				logger.Warnf("Rule ID conflict: %s (file: %s overrides the previous rule)",
 					ruleName, filepath.Base(filePath))
 				logger.Debugf("  原规则DSL: %v", existingRule.DSL)
 				logger.Debugf("  新规则DSL: %v", rule.DSL)
@@ -290,7 +290,7 @@ func (u *Updater) CheckForUpdates() (bool, string, string, error) {
 }
 
 func (u *Updater) UpdateRules() error {
-	logger.Infof("正在从云端下载最新指纹库: %s", u.RemoteURL)
+	logger.Infof("Downloading latest fingerprint rules from cloud: %s", u.RemoteURL)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(u.RemoteURL)
@@ -322,7 +322,7 @@ func (u *Updater) UpdateRules() error {
 		return fmt.Errorf("写入文件失败: %v", err)
 	}
 
-	logger.Infof("指纹库已更新成功! 版本: %s", version)
+	logger.Infof("Fingerprint rules updated successfully! Version: %s", version)
 	return nil
 }
 

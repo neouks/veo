@@ -331,15 +331,15 @@ type RealtimeCSVReporter struct {
 func NewRealtimeCSVReporter(outputPath string) (*RealtimeCSVReporter, error) {
 	outputPath = strings.TrimSpace(outputPath)
 	if outputPath == "" {
-		return nil, fmt.Errorf("输出路径为空")
+		return nil, fmt.Errorf("output path is empty")
 	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return nil, fmt.Errorf("创建输出目录失败: %w", err)
+		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	f, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("打开输出文件失败: %w", err)
+		return nil, fmt.Errorf("failed to open output file: %w", err)
 	}
 
 	r := &RealtimeCSVReporter{
@@ -351,12 +351,12 @@ func NewRealtimeCSVReporter(outputPath string) (*RealtimeCSVReporter, error) {
 	if stat, err := f.Stat(); err == nil && stat.Size() == 0 {
 		if err := r.writer.Write([]string{"Timestamp", "URL", "Host", "StatusCode", "Title", "Content-Length", "Fingerprint"}); err != nil {
 			_ = f.Close()
-			return nil, fmt.Errorf("写入CSV表头失败: %w", err)
+			return nil, fmt.Errorf("failed to write CSV header: %w", err)
 		}
 		r.writer.Flush()
 		if werr := r.writer.Error(); werr != nil {
 			_ = f.Close()
-			return nil, fmt.Errorf("写入CSV表头失败: %w", werr)
+			return nil, fmt.Errorf("failed to write CSV header: %w", werr)
 		}
 	}
 

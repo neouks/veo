@@ -106,11 +106,11 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 	// 1. 生成扫描URL
 	scanURLs, err := e.generateScanURLs(collectorInstance, recursive)
 	if err != nil {
-		return nil, fmt.Errorf("生成扫描URL失败: %v", err)
+		return nil, fmt.Errorf("failed to generate scan URLs: %v", err)
 	}
 
 	if len(scanURLs) == 0 {
-		return nil, fmt.Errorf("没有收集到URL，无法开始扫描")
+		return nil, fmt.Errorf("no collected URLs, unable to start scan")
 	}
 
 	logger.Debugf("生成扫描URL: %d个", len(scanURLs))
@@ -185,7 +185,7 @@ func (e *Engine) PerformScanWithFilter(ctx context.Context, collectorInstance in
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("HTTP请求执行失败: %v", err)
+		return nil, fmt.Errorf("HTTP request execution failed: %v", err)
 	}
 
 	if totalResponses == 0 {
@@ -379,12 +379,6 @@ func (e *Engine) extractTarget(responses []*interfaces.HTTPResponse) string {
 	return firstURL
 }
 
-type cancelReasonKey struct{}
-
-var CancelReasonKey = cancelReasonKey{}
-
-const CancelReasonWAF = "waf-timeout"
-
 type LayerScanner func(targets []string, filter *ResponseFilter, depth int) ([]interfaces.HTTPResponse, error)
 
 func RunRecursiveScan(
@@ -409,13 +403,10 @@ func RunRecursiveScan(
 	for d := 0; d <= maxDepth; d++ {
 		select {
 		case <-ctx.Done():
-			if reason, ok := ctx.Value(CancelReasonKey).(string); ok && reason == CancelReasonWAF {
-				return allResults, nil
-			}
 			if maxDepth > 0 {
-				logger.Warn("递归扫描被取消")
+				logger.Warn("Recursive scan canceled")
 			} else {
-				logger.Warn("扫描被取消")
+				logger.Warn("Scan canceled")
 			}
 			return allResults, nil
 		default:
@@ -426,7 +417,7 @@ func RunRecursiveScan(
 		}
 
 		if d > 0 {
-			logger.Infof("正在进行第 %d 层递归目录扫描，目标数量: %d", d, len(currentTargets))
+			logger.Infof("Running recursive dirscan depth %d, target count: %d", d, len(currentTargets))
 			if len(currentTargets) <= 5 {
 				for _, target := range currentTargets {
 					logger.Debugf("  └─ 递归目标: %s", target)
@@ -454,7 +445,7 @@ func RunRecursiveScan(
 					logger.Errorf("Scanning Error，No Valid HTTP response received")
 				}
 			} else {
-				logger.Errorf("目录扫描出错 (Depth %d): %v", d, err)
+				logger.Errorf("Dirscan error (depth %d): %v", d, err)
 			}
 		}
 

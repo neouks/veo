@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -265,30 +266,26 @@ func normalizeHostKey(host string) (string, string) {
 
 // matchPattern 简单的模式匹配（支持通配符*）
 func matchPattern(text, pattern string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if text == "" || pattern == "" {
+		return false
+	}
+
 	if pattern == "*" {
 		return true
 	}
 
-	if !strings.Contains(pattern, "*") {
+	if !strings.ContainsAny(pattern, "*?[") {
 		return text == pattern
 	}
 
-	// 简单的通配符匹配
-	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
-		// *example*
-		middle := pattern[1 : len(pattern)-1]
-		return strings.Contains(text, middle)
-	} else if strings.HasPrefix(pattern, "*") {
-		// *example
-		suffix := pattern[1:]
-		return strings.HasSuffix(text, suffix)
-	} else if strings.HasSuffix(pattern, "*") {
-		// example*
-		prefix := pattern[:len(pattern)-1]
-		return strings.HasPrefix(text, prefix)
+	matched, err := path.Match(pattern, text)
+	if err != nil {
+		logger.Debugf("主机模式匹配失败: pattern=%s text=%s err=%v", pattern, text, err)
+		return text == pattern
 	}
-
-	return text == pattern
+	return matched
 }
 
 // HTTP认证头部全局管理

@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"veo/pkg/logger"
@@ -58,7 +57,7 @@ func (ug *URLGenerator) GenerateURLsFromCollector(collector interfaces.URLCollec
 	// 获取收集的URL
 	urlMap := collector.GetURLMap()
 	if len(urlMap) == 0 {
-		logger.Info("没有收集到URL，无法生成扫描内容")
+		logger.Info("No collected URLs, unable to generate scan targets")
 		return []string{}
 	}
 
@@ -462,7 +461,7 @@ func getConfiguredWordlists() []string {
 			continue
 		}
 		if _, err := os.Stat(path); err != nil {
-			logger.Warnf("字典文件不可用: %s (%v)", path, err)
+			logger.Warnf("Wordlist file unavailable: %s (%v)", path, err)
 			continue
 		}
 		seen[path] = struct{}{}
@@ -528,7 +527,7 @@ func (dm *DictionaryManager) loadToCache() {
 	}
 
 	if len(entries) == 0 {
-		logger.Warnf("未能加载任何自定义字典，尝试使用默认字典: %s", defaultWordlistPath)
+		logger.Warnf("No custom wordlists could be loaded, trying default wordlist: %s", defaultWordlistPath)
 		fallbackEntries, lineCount, commentCount, err := readWordlist(defaultWordlistPath)
 		if err == nil {
 			entries = append(entries, fallbackEntries...)
@@ -536,7 +535,7 @@ func (dm *DictionaryManager) loadToCache() {
 			logger.Debugf("默认字典加载完成: %s, 总行数 %d, 注释行 %d, 有效条目 %d",
 				defaultWordlistPath, lineCount, commentCount, len(fallbackEntries))
 		} else {
-			logger.Warnf("默认字典加载失败: %v", err)
+			logger.Warnf("Failed to load default wordlist: %v", err)
 		}
 	}
 
@@ -545,14 +544,14 @@ func (dm *DictionaryManager) loadToCache() {
 
 	logger.Debugf("字典加载完成，成功加载 %d 个条目", total)
 	if len(warnings) > 0 {
-		logger.Warnf("字典加载警告: %s", strings.Join(warnings, "; "))
+		logger.Warnf("Wordlist load warnings: %s", strings.Join(warnings, "; "))
 	}
 }
 
 func readWordlist(path string) ([]string, int, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("打开字典文件失败: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to open wordlist file: %w", err)
 	}
 	defer file.Close()
 
@@ -574,7 +573,7 @@ func readWordlist(path string) ([]string, int, int, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, lineCount, commentCount, fmt.Errorf("读取字典文件失败: %w", err)
+		return nil, lineCount, commentCount, fmt.Errorf("failed to read wordlist file: %w", err)
 	}
 
 	return entries, lineCount, commentCount, nil
@@ -614,39 +613,10 @@ func (dm *DictionaryManager) Reset() {
 }
 
 type URLCleaner struct {
-	invalidParams     map[string]bool
-	authParams        map[string]bool
-	timestampPatterns []string
-	timestampRegex    []*regexp.Regexp
 }
 
 func NewURLCleaner() *URLCleaner {
-	cleaner := &URLCleaner{
-		invalidParams: map[string]bool{
-			"_t": true, "time": true, "timestamp": true, "_": true,
-			"cachebust": true, "nocache": true, "v": true, "version": true,
-			"rand": true, "random": true, "_random": true, "cb": true, "callback": true,
-		},
-		authParams: map[string]bool{
-			"token": true, "auth": true, "authorization": true, "bearer": true,
-			"jwt": true, "access_token": true, "refresh_token": true,
-			"api_key": true, "apikey": true, "secret": true,
-			"session": true, "sessionid": true, "sid": true,
-			"jsessionid": true, "phpsessid": true,
-			"userid": true, "user_id": true, "uid": true, "username": true,
-			"account": true, "email": true, "role": true, "group": true,
-			"tenant": true, "tenant_id": true,
-			"permission": true, "scope": true, "access": true, "privilege": true,
-		},
-		timestampPatterns: []string{
-			`^\d{10}$`, `^\d{13}$`, `^\d{16}$`, `^[0-9]{8,}$`,
-		},
-	}
-	cleaner.timestampRegex = make([]*regexp.Regexp, 0, len(cleaner.timestampPatterns))
-	for _, pattern := range cleaner.timestampPatterns {
-		cleaner.timestampRegex = append(cleaner.timestampRegex, regexp.MustCompile(pattern))
-	}
-	return cleaner
+	return &URLCleaner{}
 }
 
 func (c *URLCleaner) IsStaticResource(rawURL string) bool {
@@ -667,7 +637,7 @@ func (c *URLCleaner) IsStaticResource(rawURL string) bool {
 	return false
 }
 
-func (c *URLCleaner) CleanURLParams(rawURL string) string {
+func (c *URLCleaner) NormalizeCollectedURL(rawURL string) string {
 	valid, fixedURL := c.validateAndFixURL(rawURL)
 	if !valid {
 		return ""
@@ -678,23 +648,9 @@ func (c *URLCleaner) CleanURLParams(rawURL string) string {
 		return ""
 	}
 
-	pathCleaned := c.cleanPathID(parsedURL)
-	if parsedURL.RawQuery == "" && !pathCleaned {
-		return fixedURL
-	}
-
-	validParams := url.Values{}
-	for key, values := range parsedURL.Query() {
-		if c.isValidParam(key, values) {
-			validParams[key] = values
-		}
-	}
-
-	if len(validParams) == 0 {
-		parsedURL.RawQuery = ""
-	} else {
-		parsedURL.RawQuery = validParams.Encode()
-	}
+	c.normalizeCollectionPath(parsedURL)
+	parsedURL.RawQuery = ""
+	parsedURL.Fragment = ""
 
 	return parsedURL.String()
 }
@@ -727,44 +683,27 @@ func (c *URLCleaner) validateAndFixURL(rawURL string) (bool, string) {
 	return true, fixedURL
 }
 
-func (c *URLCleaner) cleanPathID(u *url.URL) bool {
-	path := strings.TrimRight(u.Path, "/")
+func (c *URLCleaner) normalizeCollectionPath(u *url.URL) {
+	if u == nil {
+		return
+	}
+
+	path := strings.TrimSpace(u.Path)
+	if path == "" || path == "/" {
+		u.Path = "/"
+		return
+	}
+
+	if strings.HasSuffix(path, "/") {
+		u.Path = path
+		return
+	}
+
 	idx := strings.LastIndex(path, "/")
-	if idx == -1 {
-		return false
+	if idx <= 0 {
+		u.Path = "/"
+		return
 	}
 
-	segment := path[idx+1:]
-	isNumeric := segment != ""
-	for _, r := range segment {
-		if r < '0' || r > '9' {
-			isNumeric = false
-			break
-		}
-	}
-
-	if isNumeric {
-		u.Path = path[:idx]
-		return true
-	}
-	return false
-}
-
-func (c *URLCleaner) isValidParam(key string, values []string) bool {
-	lowerKey := strings.ToLower(key)
-	if c.invalidParams[lowerKey] {
-		return false
-	}
-	if c.authParams[lowerKey] {
-		return true
-	}
-
-	for _, v := range values {
-		for _, p := range c.timestampRegex {
-			if p.MatchString(v) {
-				return false
-			}
-		}
-	}
-	return true
+	u.Path = path[:idx+1]
 }

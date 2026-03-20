@@ -203,7 +203,7 @@ func ParseCLIArgs() *CLIArgs {
 	}
 
 	if err := validateArgs(args); err != nil {
-		logger.Error(fmt.Sprintf("参数验证失败: %v", err))
+		logger.Error(fmt.Sprintf("Argument validation failed: %v", err))
 		os.Exit(1)
 	}
 
@@ -234,7 +234,12 @@ func showCustomHelp() {
 	listenExample := ""
 	if passiveBuild {
 		listenHelp = "  --listen          启用被动代理模式\n  -lp int           被动代理监听端口 (默认: 9080)\n"
-		listenExample = fmt.Sprintf("  %s -u target.com --listen --lp 8080\n", prog)
+		listenExample = fmt.Sprintf(
+			"  %s -u target.com --listen --lp 8080\n  %s -u *.baidu.com --listen --lp 8080\n  %s -u 10.0.0.* --listen --lp 8080\n",
+			prog,
+			prog,
+			prog,
+		)
 	}
 
 	fmt.Printf(`
@@ -245,7 +250,7 @@ veo - 指纹识别/目录扫描
   %[1]s -l <file> [options]
 %s
 目标与模块:
-  -u string          目标列表，逗号分隔；支持 URL / 域名 / host:port / CIDR / IP 范围
+  -u string          目标列表，逗号分隔；支持 URL / 域名 / host:port / CIDR / IP 范围；被动模式额外支持通配主机，如 *.baidu.com、10.0.0.*
   -l string          目标文件，每行一个目标；支持空行和 # 注释
   -m string          启用模块，默认 finger,dirscan。可选 finger / dirscan
 
@@ -294,28 +299,28 @@ veo - 指纹识别/目录扫描
 // validateArgs 验证CLI参数
 func validateArgs(args *CLIArgs) error {
 	if args.Listen && !passiveBuild {
-		return fmt.Errorf("当前构建不支持被动代理模式 (--listen)")
+		return fmt.Errorf("the current build does not support passive proxy mode (--listen)")
 	}
 
 	if args.Listen {
 		if args.CheckSimilarOnly {
-			return fmt.Errorf("相似性检查模式不支持被动代理 (--check-similar-only)")
+			return fmt.Errorf("similarity-check mode does not support passive proxy (--check-similar-only)")
 		}
 		if args.Port <= 0 || args.Port > 65535 {
-			return fmt.Errorf("端口必须在1-65535范围内，当前值: %d", args.Port)
+			return fmt.Errorf("port must be in the range 1-65535, got: %d", args.Port)
 		}
 	}
 
 	if args.Threads < 0 || args.Threads > 1000 {
-		return fmt.Errorf("线程并发数量必须在0-1000范围内，当前值: %d", args.Threads)
+		return fmt.Errorf("thread count must be in the range 0-1000, got: %d", args.Threads)
 	}
 
 	if args.Retry < 0 || args.Retry > 10 {
-		return fmt.Errorf("重试次数必须在0-10范围内，当前值: %d", args.Retry)
+		return fmt.Errorf("retry count must be in the range 0-10, got: %d", args.Retry)
 	}
 
 	if args.Timeout < 0 || args.Timeout > 300 {
-		return fmt.Errorf("超时时间必须在0-300秒范围内，当前值: %d", args.Timeout)
+		return fmt.Errorf("timeout must be in the range 0-300 seconds, got: %d", args.Timeout)
 	}
 
 	if args.Listen {
@@ -323,41 +328,41 @@ func validateArgs(args *CLIArgs) error {
 			args.Targets = []string{"*"}
 		}
 	} else if !args.UpdateRules && len(args.Targets) == 0 && args.TargetFile == "" {
-		return fmt.Errorf("必须指定目标主机/URL (-u) 或目标文件 (-l)")
+		return fmt.Errorf("either target hosts/URLs (-u) or a target file (-l) must be provided")
 	}
 
 	if !args.Listen {
 		for _, target := range args.Targets {
-			if target == "*" {
-				return fmt.Errorf("主动扫描模式不支持通配符目标，请指定具体的URL")
+			if strings.Contains(target, "*") {
+				return fmt.Errorf("active scan mode does not support wildcard targets, please specify a concrete URL")
 			}
 		}
 	}
 
 	if !args.UpdateRules {
 		if err := validateTargets(args.Targets); err != nil {
-			return fmt.Errorf("目标参数无效: %v", err)
+			return fmt.Errorf("invalid target arguments: %v", err)
 		}
 	}
 
 	if args.Wordlist != "" {
 		if err := validateWordlistFile(args.Wordlist); err != nil {
-			return fmt.Errorf("字典文件无效: %v", err)
+			return fmt.Errorf("invalid wordlist file: %v", err)
 		}
 	}
 
 	if args.Output != "" {
 		if err := validateOutputPath(args.Output); err != nil {
-			return fmt.Errorf("输出路径无效: %v", err)
+			return fmt.Errorf("invalid output path: %v", err)
 		}
 	}
 
 	if err := validateModules(args.Modules); err != nil {
-		return fmt.Errorf("模块参数无效: %v", err)
+		return fmt.Errorf("invalid module arguments: %v", err)
 	}
 
 	if len(args.Modules) == 0 {
-		return fmt.Errorf("内部错误: 模块列表为空（应该已设置默认模块）")
+		return fmt.Errorf("internal error: module list is empty (default modules should already be set)")
 	}
 
 	return nil
@@ -367,21 +372,24 @@ func validateArgs(args *CLIArgs) error {
 func validateTargets(targets []string) error {
 	for _, target := range targets {
 		if strings.Contains(target, " ") {
-			return fmt.Errorf("目标不能包含空格: '%s'", target)
+			return fmt.Errorf("target must not contain spaces: '%s'", target)
 		}
 		if len(target) == 0 {
-			return fmt.Errorf("目标不能为空")
+			return fmt.Errorf("target must not be empty")
 		}
 
 		if target == "*" {
 			if passiveBuild {
 				continue
 			}
-			return fmt.Errorf("主动扫描模式不支持通配符目标，请指定具体的URL")
+			return fmt.Errorf("active scan mode does not support wildcard targets, please specify a concrete URL")
+		}
+		if !passiveBuild && strings.Contains(target, "*") {
+			return fmt.Errorf("active scan mode does not support wildcard targets, please specify a concrete URL")
 		}
 
 		if strings.HasPrefix(target, ".") || strings.HasSuffix(target, ".") {
-			return fmt.Errorf("无效的目标格式: '%s'", target)
+			return fmt.Errorf("invalid target format: '%s'", target)
 		}
 	}
 	return nil
@@ -455,14 +463,14 @@ func applyArgsToConfig(args *CLIArgs) {
 
 	requestConfig := config.GetRequestConfig()
 	if requestConfig == nil {
-		logger.Warn("请求配置未初始化，跳过线程/超时设置")
+		logger.Warn("Request config is not initialized, skipping thread/timeout settings")
 	} else {
 		applyRequestArgsToConfig(requestConfig, args)
 	}
 
 	if len(args.Headers) > 0 {
 		if parsed, err := parseHeaderFlags(args.Headers); err != nil {
-			logger.Errorf("HTTP头部参数处理失败: %v", err)
+			logger.Errorf("Failed to parse HTTP header arguments: %v", err)
 		} else if len(parsed) > 0 {
 			config.SetCustomHeaders(parsed)
 		}
@@ -472,18 +480,18 @@ func applyArgsToConfig(args *CLIArgs) {
 	if args.StatusCodes != "" {
 		statusCodes, err := parseStatusCodes(args.StatusCodes)
 		if err != nil {
-			logger.Errorf("状态码过滤参数处理失败: %v", err)
+			logger.Errorf("Failed to parse status code filter arguments: %v", err)
 		} else if len(statusCodes) > 0 {
 			customFilterConfig = ensureFilterConfig(customFilterConfig)
 			customFilterConfig.ValidStatusCodes = statusCodes
-			logger.Infof("状态码过滤设置为 %v", statusCodes)
+			logger.Infof("Status code filter set to %v", statusCodes)
 		}
 	}
 
 	if args.DisableHashFilter {
 		customFilterConfig = ensureFilterConfig(customFilterConfig)
 		customFilterConfig.DisableHashFilter = true
-		logger.Warn("CLI参数：已禁用目录扫描哈希过滤 (--no-filter)")
+		logger.Warn("CLI option: dirscan hash filtering disabled (--no-filter)")
 	}
 
 	if customFilterConfig != nil {
@@ -599,13 +607,13 @@ func parseModules(modulesStr string) []string {
 // validateWordlistFile 验证字典文件
 func validateWordlistFile(wordlistPath string) error {
 	if _, err := os.Stat(wordlistPath); os.IsNotExist(err) {
-		return fmt.Errorf("字典文件不存在: %s", wordlistPath)
+		return fmt.Errorf("wordlist file does not exist: %s", wordlistPath)
 	}
 
 	// 检查文件是否可读
 	file, err := os.Open(wordlistPath)
 	if err != nil {
-		return fmt.Errorf("无法读取字典文件: %v", err)
+		return fmt.Errorf("unable to read wordlist file: %v", err)
 	}
 	file.Close()
 
@@ -616,21 +624,21 @@ func validateWordlistFile(wordlistPath string) error {
 func validateOutputPath(outputPath string) error {
 	outputPath = strings.TrimSpace(outputPath)
 	if outputPath == "" {
-		return fmt.Errorf("输出路径不能为空")
+		return fmt.Errorf("output path must not be empty")
 	}
 	dir := filepath.Dir(outputPath)
 
 	// 如果目录不存在，尝试创建
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("无法创建输出目录 %s: %v", dir, err)
+			return fmt.Errorf("unable to create output directory %s: %v", dir, err)
 		}
 	}
 
 	// 检查目录是否可写
 	testFile := filepath.Join(dir, ".veo_write_test")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
-		return fmt.Errorf("输出目录不可写 %s: %v", dir, err)
+		return fmt.Errorf("output directory is not writable %s: %v", dir, err)
 	}
 	os.Remove(testFile) // 清理测试文件
 
@@ -640,7 +648,7 @@ func validateOutputPath(outputPath string) error {
 func validateModules(modules []string) error {
 	for _, module := range modules {
 		if !isValidModule(module) {
-			return fmt.Errorf("无效的模块: '%s'，支持的模块: %s", module, strings.Join(ValidModules, ", "))
+			return fmt.Errorf("invalid module: '%s', supported modules: %s", module, strings.Join(ValidModules, ", "))
 		}
 	}
 	return nil
@@ -664,19 +672,19 @@ func parseHeaderFlags(headers []string) (map[string]string, error) {
 			continue
 		}
 		if strings.ContainsAny(h, "\r\n") {
-			return nil, fmt.Errorf("头部不能包含换行符: %q", h)
+			return nil, fmt.Errorf("header must not contain newlines: %q", h)
 		}
 		parts := strings.SplitN(h, ":", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("无效的头部格式: %s (需要 Header: Value)", h)
+			return nil, fmt.Errorf("invalid header format: %s (expected Header: Value)", h)
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 		if key == "" {
-			return nil, fmt.Errorf("头部名称不能为空: %s", h)
+			return nil, fmt.Errorf("header name must not be empty: %s", h)
 		}
 		if value == "" {
-			return nil, fmt.Errorf("头部值不能为空: %s", h)
+			return nil, fmt.Errorf("header value must not be empty: %s", h)
 		}
 		parsed[key] = value
 	}
@@ -686,7 +694,7 @@ func parseHeaderFlags(headers []string) (map[string]string, error) {
 // parseStatusCodes 解析CLI参数中的状态码字符串
 func parseStatusCodes(statusCodesStr string) ([]int, error) {
 	if statusCodesStr == "" {
-		return nil, fmt.Errorf("状态码字符串不能为空")
+		return nil, fmt.Errorf("status code string must not be empty")
 	}
 
 	// 分割逗号分隔的状态码
@@ -702,12 +710,12 @@ func parseStatusCodes(statusCodesStr string) ([]int, error) {
 		// 转换为整数
 		code, err := strconv.Atoi(codeStr)
 		if err != nil {
-			return nil, fmt.Errorf("无效的状态码 '%s': 必须是整数", codeStr)
+			return nil, fmt.Errorf("invalid status code '%s': must be an integer", codeStr)
 		}
 
 		// 验证状态码范围
 		if err := validateStatusCode(code); err != nil {
-			return nil, fmt.Errorf("无效的状态码 %d: %v", code, err)
+			return nil, fmt.Errorf("invalid status code %d: %v", code, err)
 		}
 
 		statusCodes = append(statusCodes, code)
@@ -715,7 +723,7 @@ func parseStatusCodes(statusCodesStr string) ([]int, error) {
 	}
 
 	if len(statusCodes) == 0 {
-		return nil, fmt.Errorf("未解析到有效的状态码")
+		return nil, fmt.Errorf("no valid status codes were parsed")
 	}
 
 	return statusCodes, nil
@@ -725,7 +733,7 @@ func parseStatusCodes(statusCodesStr string) ([]int, error) {
 func validateStatusCode(code int) error {
 	// HTTP状态码范围: 100-599
 	if code < 100 || code > 599 {
-		return fmt.Errorf("状态码必须在100-599之间")
+		return fmt.Errorf("status code must be between 100 and 599")
 	}
 	return nil
 }
@@ -752,31 +760,22 @@ func parseWordlistPaths(raw string) []string {
 }
 
 func buildHostAllowList(targets []string) []string {
-	allow := make([]string, 0, len(targets)*2)
+	allow := make([]string, 0, len(targets))
 	seen := make(map[string]struct{})
 	for _, raw := range targets {
-		host, port, wildcard := normalizeTargetHost(raw)
+		host, _, _ := normalizeTargetHost(raw)
 		if host == "" {
 			continue
 		}
-		add := func(value string) {
-			value = strings.TrimSpace(strings.ToLower(value))
-			if value == "" {
-				return
-			}
-			if _, ok := seen[value]; ok {
-				return
-			}
-			allow = append(allow, value)
-			seen[value] = struct{}{}
-		}
-		add(host)
-		if port != "" {
-			add(host + ":" + port)
-		}
-		if wildcard {
+		host = strings.TrimSpace(strings.ToLower(host))
+		if host == "" {
 			continue
 		}
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		allow = append(allow, host)
+		seen[host] = struct{}{}
 	}
 	return allow
 }
@@ -828,11 +827,11 @@ func handleRuleUpdates(args *CLIArgs) {
 	updater := fpaddon.NewUpdater("config/fingerprint/finger.yaml")
 
 	if args.UpdateRules {
-		logger.Info("正在检查并更新指纹识别规则库...")
+		logger.Info("Checking for fingerprint rule updates...")
 		if err := updater.UpdateRules(); err != nil {
 			logger.Fatalf("指纹库更新失败: %v", err)
 		}
-		logger.Info("指纹库更新完成")
+		logger.Info("Fingerprint rules updated")
 		os.Exit(0)
 	}
 
@@ -845,7 +844,7 @@ func handleRuleUpdates(args *CLIArgs) {
 	}
 
 	if hasUpdate {
-		msg := fmt.Sprintf("发现新的指纹库版本: %s (当前: %s)，请运行 --update-rules 进行更新", remoteVer, localVer)
+		msg := fmt.Sprintf("New fingerprint rules version available: %s (current: %s), run --update-rules to update", remoteVer, localVer)
 		logger.Info(msg)
 	} else {
 		logger.Debugf("指纹库已是最新版本: %s", localVer)

@@ -74,13 +74,6 @@ hosts:
 
 addon:
   collector:
-    GenerationStatusCodes:
-      - 200
-      - 403
-      - 401
-      - 500
-      - 405
-    
     static:
       path:
         - "/undefined"

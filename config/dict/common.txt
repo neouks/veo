@@ -497,6 +497,7 @@
 /v3/api-docs;.js
 
 # 3. 组件路径
+/kkfileview/
 /jenkins/
 /arcgis/
 /arcgis/tokens/generateToken

@@ -405,7 +405,7 @@ func (rp *RequestProcessor) makeRequestWithHeaders(rawURL string, extraHeaders m
 	body, statusCode, respHeaders, err := rp.client.MakeRequestFullWithHeaders(rawURL, headers)
 	if err != nil {
 		rp.logRequestError(rawURL, err)
-		return nil, fmt.Errorf("请求失败: %v", err)
+		return nil, fmt.Errorf("request failed: %v", err)
 	}
 
 	return rp.processResponse(rawURL, statusCode, body, respHeaders, nil, startTime)
@@ -416,7 +416,7 @@ func (rp *RequestProcessor) logRequestError(rawURL string, err error) {
 	if rp.isTimeoutOrCanceledError(err) {
 		logger.Debugf("请求超时: %s, 耗时: >%v, 错误: %v", rawURL, rp.config.Timeout, err)
 	} else if rp.isRedirectError(err) {
-		logger.Warnf("重定向失败: %s, 错误: %v", rawURL, err)
+		logger.Warnf("Redirect failed: %s, error: %v", rawURL, err)
 	} else {
 		logger.Debugf("请求异常: %s, 错误: %v", rawURL, err)
 	}
@@ -923,7 +923,7 @@ func (rp *RequestProcessor) processResponse(url string, statusCode int, body str
 		ResponseHeaders: responseHeaders,
 		RequestHeaders:  requestHeaders,
 		RemoteIP:        remoteIP,
-		BodyDecoded:     decodedBody || rp.GetModuleContext() == "dirscan",
+		BodyDecoded:     decodedBody,
 		Server:          server,
 		IsDirectory:     rp.isDirectoryURL(url),
 		Length:          contentLength,
@@ -946,7 +946,7 @@ func (rp *RequestProcessor) extractTitleSafely(url, body string) string {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Warnf("标题提取发生panic，URL: %s, 错误: %v", url, r)
+				logger.Warnf("Title extraction panicked, URL: %s, error: %v", url, r)
 				title = "标题提取失败"
 			}
 		}()

@@ -1033,7 +1033,8 @@ yozodcs:
 
 红帆ioffice:
   dsl:
-    - "contains(body, 'HFOffice')"
+    - "title('iOffice30')"
+    - "contains(body, 'HFOffice','iOffice30','iOffice')"
     - "contains(body, 'hongfan. all rights reserved')"
     - "contains(body, 'xspreadsheet.css')"
     - "contains(body, 'js/sheet/xspreadsheet.css')"
@@ -1145,10 +1146,6 @@ gsis:
   dsl:
     - "contains(body, '/ClientBin/Kingdee.BOS.XPF.App.xap')"
 
-safedog:
-  dsl:
-    - "contains(body, '404.safedog.cn')"
-
 阿里云cdn:
   dsl:
     - "contains(body, 'cdn.aliyuncs.com')"
@@ -1164,10 +1161,6 @@ citrix-web-pn-server:
 h3c-er8300:
   dsl:
     - "contains(body, 'ER8300系统管理')"
-
-mcu:
-  dsl:
-    - "contains(body, 'McuR5-min.js')"
 
 tp-link-wireless-wdr3600:
   dsl:
@@ -1632,7 +1625,6 @@ asp.net.api:
     - "contains(body, 'portal/skin/redblack')"
     - "contains(body, 'portal/ui/static/i18n')"
     - "contains(body, 'portal/ui/static/css')"
-    - "contains(header, '/portal/')"
     - "contains(body, 'home/locationIndex.action')"
     - "contains(body, 'htmlDecode('智能物联感知平台'))"
     - "contains(body, '/portal/conf/icon/logo.png')"
@@ -1664,6 +1656,7 @@ REALOR瑞友天翼虚拟化系统:
     - "contains(body, 'CASMain.XGI')"
 
 kkfileview:
+  path: "/kkfileview/"
   dsl:
     - "contains(body, 'kkview.cn','09ZHSXbsQ','kkFileView','上传的文件不能超过500MB喔！！！','daxiao.replace')"
     - "contains(body, 'theme-showcase')"

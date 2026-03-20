@@ -497,7 +497,7 @@ func (e *Engine) matchRule(rule *FingerprintRule, ctx *DSLContext) *FingerprintM
 	case "or":
 	default:
 		if condition != "or" {
-			logger.Warnf("不支持的条件类型: %s, 使用默认OR条件", condition)
+			logger.Warnf("Unsupported condition type: %s, using default OR condition", condition)
 		}
 	}
 
@@ -643,7 +643,7 @@ func (e *Engine) ExecuteActiveProbing(ctx context.Context, baseURL string, httpC
 	}
 
 	if _, err := url.Parse(baseURL); err != nil {
-		return nil, fmt.Errorf("URL解析失败: %v", err)
+		return nil, fmt.Errorf("failed to parse URL: %v", err)
 	}
 
 	var (
@@ -791,7 +791,7 @@ func (e *Engine) ExecuteIconProbing(ctx context.Context, baseURL string, httpCli
 	}
 
 	if _, err := url.Parse(baseURL); err != nil {
-		return nil, fmt.Errorf("URL解析失败: %v", err)
+		return nil, fmt.Errorf("failed to parse URL: %v", err)
 	}
 
 	resp := &HTTPResponse{
@@ -827,7 +827,7 @@ func (e *Engine) Execute404Probing(ctx context.Context, baseURL string, httpClie
 
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("URL解析失败: %v", err)
+		return nil, fmt.Errorf("failed to parse URL: %v", err)
 	}
 	notFoundURL := fmt.Sprintf("%s://%s/404test", parsedURL.Scheme, parsedURL.Host)
 
@@ -985,14 +985,14 @@ func (c *IconCache) GetHash(iconURL string, client httpclient.HTTPClientInterfac
 
 func (c *IconCache) handleCachedHash(val string) (string, error) {
 	if val == "FAILED" {
-		return "", fmt.Errorf("图标请求失败（缓存结果）")
+		return "", fmt.Errorf("icon request failed (cached result)")
 	}
 	return val, nil
 }
 
 func (c *IconCache) performRequest(iconURL string, client httpclient.HTTPClientInterface) (string, error) {
 	if client == nil {
-		return "", fmt.Errorf("HTTP客户端为空")
+		return "", fmt.Errorf("HTTP client is nil")
 	}
 
 	logger.Debugf("发起图标请求: %s", iconURL)
@@ -1003,7 +1003,7 @@ func (c *IconCache) performRequest(iconURL string, client httpclient.HTTPClientI
 	}
 	if statusCode != 200 {
 		logger.Debugf("图标请求非200状态: %s, code=%d", iconURL, statusCode)
-		return "", fmt.Errorf("状态码 %d", statusCode)
+		return "", fmt.Errorf("status code %d", statusCode)
 	}
 
 	hash := fmt.Sprintf("%x", md5.Sum([]byte(body)))

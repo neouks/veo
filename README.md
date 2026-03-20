@@ -6,6 +6,24 @@
 
 
 ## 更新日志
+- 2026/03/20:
+  ```
+  - New：
+   1、新增被动模式 `-u` 主机通配支持：`*.baidu.com`、`10.0.0.*`，支持任意端口匹配。
+   2、新增 Linux/Windows 多架构编译目标，补充 Windows arm64、Linux arm64、Linux armv7 构建。
+  
+  - Bug Fix：
+   1、修复被动监听模式下回车触发目录扫描后，结果未进行二次指纹识别的问题。
+   2、修复被动监听模式下目录扫描结果仅最终统一打印的问题，改为实时输出并实时写入报告。
+   3、修复目录扫描 `BodyDecoded` 标记错误，避免未解压正文被误判为已解码。
+  
+  - Optimize：
+   1、重构被动监听扫描链路，删除旧的被动目录扫描分支，统一复用主动扫描执行流程，减少重复代码。
+   2、优化被动模式 URL 采集逻辑，仅按目录层级归一化记录并去重，不再记录具体 API 方法与 query 参数。
+   3、删除目录扫描超时触发的 WAF 中断逻辑，移除失效的 `GenerationStatusCodes` 配置与文档说明。
+   5、更新目录字典与指纹规则，优化部分现有规则。
+  ```
+
 - 2026/02/10:
   ```
   New：
@@ -198,6 +216,8 @@
 
 # 被动扫描（默认监听端口9080）
 ./veo -u http://target.com --listen -lp 8090
+./veo -u *.baidu.com --listen -lp 8090
+./veo -u 10.0.0.* --listen -lp 8090
 ```
 
 
@@ -207,10 +227,10 @@
 
 | 参数 | 默认值 | 说明 | 示例 |
 |------|--------|------|------|
-| `-u` | 必填或 `-l` | 目标列表，逗号分隔。支持完整 URL、域名、`host:port`、CIDR、IP 范围。 | `-u http://a.com,https://b.com` |
+| `-u` | 必填或 `-l` | 目标列表，逗号分隔。支持完整 URL、域名、`host:port`、CIDR、IP 范围；被动模式额外支持主机通配，如 `*.baidu.com`、`10.0.0.*`。 | `-u http://a.com,https://b.com` |
 | `-l` | — | 目标文件路径，每行一个目标；支持注释 `#` 和空行。 | `-l targets.txt` |
 | `-m` | `finger,dirscan` | 启用的模块，逗号分隔：`finger` 指纹识别，`dirscan` 目录扫描。 | `-m finger` |
-| `--listen` | `false` | 启用被动代理模式（监听 HTTP 流量），默认主动扫描。 | `--listen` |
+| `--listen` | `false` | 启用被动代理模式（监听 HTTP 流量），默认主动扫描；此时 `-u` 支持主机通配并按任意端口匹配。 | `--listen` |
 | `-lp` | `9080` | 被动代理监听端口，仅在 `--listen` 模式下使用。 | `-lp 8080` |
 
 ### 扫描行为
@@ -281,18 +301,16 @@ hosts:
     - "*.baidu.com"
     - "*.google.*"
 ```
-- `allow` / `reject` 控制可访问的目标域，支持通配符。
+- `allow` / `reject` 控制可访问的目标域，支持通配符；例如 `*.baidu.com` 可匹配任意层级子域名，端口不限。
 
 ### 目录扫描相关配置
 ```yaml
 addon:
   collector:
-    GenerationStatusCodes: [200, 403, 401, 500, 405]
     static:
       path: ["/css/", "/js/"]
       extensions: [".css", ".js", ".png", ...]
 ```
-- `GenerationStatusCodes` ：被动扫描时，仅采集符合状态码的URL
 - `path`：过滤静态目录
 - `extensions`：过滤静态文件
 

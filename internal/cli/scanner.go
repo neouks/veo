@@ -142,7 +142,7 @@ func runActiveScanMode(args *CLIArgs) error {
 
 func runCheckSimilarOnlyMode(args *CLIArgs) error {
 	if args == nil {
-		return fmt.Errorf("参数为空")
+		return fmt.Errorf("arguments are nil")
 	}
 
 	cfg := config.GetConfig()
@@ -235,7 +235,7 @@ func (sc *ScanController) parseTargets(targetStrs []string) ([]string, error) {
 	}
 
 	if len(allTargets) == 0 {
-		return nil, fmt.Errorf("没有有效的目标")
+		return nil, fmt.Errorf("no valid targets")
 	}
 
 	deduplicator := NewDeduplicator()
@@ -252,7 +252,7 @@ func (sc *ScanController) parseTargets(targetStrs []string) ([]string, error) {
 	if sc.args.NetworkCheck {
 		validTargets = checker.BatchCheck(uniqueTargets)
 		if len(validTargets) == 0 {
-			return nil, fmt.Errorf("没有可连通的目标")
+			return nil, fmt.Errorf("no reachable targets")
 		}
 	} else {
 		var err error
@@ -312,7 +312,7 @@ func (cc *ConnectivityChecker) BatchCheck(targets []string) []string {
 	var processedCount int64
 	total := len(candidates)
 
-	logger.Info("开始检测目标存活性...")
+	logger.Info("Starting target reachability check...")
 	for _, targetURL := range candidates {
 		wg.Add(1)
 		go func(urlStr string) {
@@ -366,7 +366,7 @@ func (cc *ConnectivityChecker) ValidateAndNormalize(targets []string) ([]string,
 	validTargets := make([]string, 0, len(targets))
 	for _, target := range targets {
 		if err := parser.ValidateURL(target); err != nil {
-			logger.Warnf("跳过无效目标 %s: %v", target, err)
+			logger.Warnf("Skipping invalid target %s: %v", target, err)
 			continue
 		}
 		urls := parser.NormalizeURL(target)
@@ -376,7 +376,7 @@ func (cc *ConnectivityChecker) ValidateAndNormalize(targets []string) ([]string,
 	}
 
 	if len(validTargets) == 0 {
-		return nil, fmt.Errorf("没有有效的目标")
+		return nil, fmt.Errorf("no valid targets")
 	}
 	return validTargets, nil
 }
@@ -470,7 +470,7 @@ func (tp *TargetParser) ParseFile(filePath string) ([]string, error) {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("无法打开目标文件: %v", err)
+		return nil, fmt.Errorf("unable to open target file: %v", err)
 	}
 	defer file.Close()
 
@@ -484,7 +484,7 @@ func (tp *TargetParser) ParseFile(filePath string) ([]string, error) {
 		targets = append(targets, line)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("读取文件时发生错误: %v", err)
+		return nil, fmt.Errorf("error while reading target file: %v", err)
 	}
 
 	logger.Debugf("从文件解析到 %d 个目标", len(targets))
@@ -522,7 +522,7 @@ func (tp *TargetParser) parseHostPort(target string) (string, int, error) {
 		}
 		port, err := strconv.Atoi(portStr)
 		if err != nil {
-			return "", 0, fmt.Errorf("无效的端口号: %s", portStr)
+			return "", 0, fmt.Errorf("invalid port number: %s", portStr)
 		}
 		return host, port, nil
 	}
@@ -553,10 +553,10 @@ func (tp *TargetParser) ValidateURL(target string) error {
 
 	parsedURL, err := url.Parse(target)
 	if err != nil {
-		return fmt.Errorf("无效的URL格式: %v", err)
+		return fmt.Errorf("invalid URL format: %v", err)
 	}
 	if parsedURL.Host == "" {
-		return fmt.Errorf("URL缺少主机名")
+		return fmt.Errorf("URL is missing a hostname")
 	}
 	return nil
 }
@@ -605,7 +605,7 @@ func NewScanController(args *CLIArgs, cfg *config.Config) *ScanController {
 		fpEngine = fingerprint.NewEngine(nil)
 		if fpEngine != nil {
 			if err := fpEngine.LoadRules(fpEngine.GetConfig().RulesPath); err != nil {
-				logger.Warnf("加载指纹规则失败，指纹识别可能无结果: %v", err)
+				logger.Warnf("Failed to load fingerprint rules, fingerprint detection may return no results: %v", err)
 			}
 		}
 	}
@@ -675,14 +675,14 @@ func (sc *ScanController) Run() error {
 	if strings.TrimSpace(sc.reportPath) != "" && !isJSONReportPath(sc.reportPath) {
 		realtimeReporter, err := reporter.NewRealtimeCSVReporter(sc.reportPath)
 		if err != nil {
-			logger.Warnf("无法创建实时CSV报告: %v", err)
+			logger.Warnf("Failed to create realtime CSV report: %v", err)
 		} else {
 			sc.realtimeReporter = realtimeReporter
 			sc.attachRealtimeReporter()
 			logger.Infof("Realtime CSV Report: %s", realtimeReporter.Path())
 			defer func() {
 				if err := realtimeReporter.Close(); err != nil {
-					logger.Warnf("关闭实时CSV报告失败: %v", err)
+					logger.Warnf("Failed to close realtime CSV report: %v", err)
 				}
 			}()
 		}
@@ -790,7 +790,7 @@ func (sc *ScanController) executeModulesSequenceWithContext(ctx context.Context,
 
 		moduleResults, err := sc.runModuleForTargetsWithContext(ctx, moduleName, targets)
 		if err != nil {
-			logger.Errorf("模块 %s 执行失败: %v", moduleName, err)
+			logger.Errorf("Module %s execution failed: %v", moduleName, err)
 			continue
 		}
 
@@ -866,7 +866,7 @@ func (sc *ScanController) outputConsoleJSON(dirResults, fingerprintResults []int
 
 	jsonStr, err := sc.generateConsoleJSON(dirResults, fingerprintResults, filterResult)
 	if err != nil {
-		logger.Errorf("生成JSON输出失败: %v", err)
+		logger.Errorf("Failed to generate JSON output: %v", err)
 		return
 	}
 	fmt.Println(jsonStr)
@@ -879,11 +879,11 @@ func (sc *ScanController) outputJSONReport(dirResults, fingerprintResults []inte
 
 	jsonStr, err := sc.generateJSONReport(dirResults, fingerprintResults, filterResult)
 	if err != nil {
-		logger.Errorf("生成JSON报告失败: %v", err)
+		logger.Errorf("Failed to generate JSON report: %v", err)
 		return
 	}
 	if writeErr := os.WriteFile(sc.reportPath, []byte(jsonStr), 0644); writeErr != nil {
-		logger.Errorf("写入JSON报告失败: %v", writeErr)
+		logger.Errorf("Failed to write JSON report: %v", writeErr)
 		return
 	}
 	logger.Infof("Report Output Success: %s", sc.reportPath)
@@ -921,7 +921,7 @@ func (sc *ScanController) runModuleForTargetsWithContext(ctx context.Context, mo
 		return sc.runFingerprintModuleWithContext(ctx, targets)
 
 	default:
-		return nil, fmt.Errorf("不支持的模块: %s", moduleName)
+		return nil, fmt.Errorf("unsupported module: %s", moduleName)
 	}
 }
 func (sc *ScanController) generateJSONReport(dirPages, fingerprintPages []interfaces.HTTPResponse, filterResult *interfaces.FilterResult) (string, error) {
@@ -1176,7 +1176,7 @@ func (sc *ScanController) checkSimilarTargetsWithReport(ctx context.Context, tar
 		return targets, report
 	}
 
-	logSimilarInfo(sc, "开始相似目标检查: %d", len(targets))
+	logSimilarInfo(sc, "Starting similar target check: %d", len(targets))
 
 	reqProcessor := sc.requestProcessor.CloneWithContext("fingerprint-similar", 0)
 	reqProcessor.SetStatsUpdater(nil)
@@ -1331,7 +1331,7 @@ func (sc *ScanController) checkSimilarTargetsWithReport(ctx context.Context, tar
 	report.SimilarPairs = similarPairs
 	report.TimeoutTargets = timeoutTargets
 
-	logSimilarInfo(sc, "相似目标检查完成: 输入 %d, 保留 %d, 去重 %d, 失败 %d", len(targets), len(kept), deduped, len(failed))
+	logSimilarInfo(sc, "Similar target check completed: input %d, kept %d, deduped %d, failed %d", len(targets), len(kept), deduped, len(failed))
 	return kept, report
 }
 
@@ -1544,80 +1544,6 @@ func isHTTPSURL(raw string) bool {
 	return strings.HasPrefix(strings.ToLower(raw), "https://")
 }
 
-const dirscanTimeoutDropThreshold = 100
-
-type timeoutDropper struct {
-	base      requests.StatsUpdater
-	threshold int64
-	onExceed  func()
-	count     int64
-	triggered int32
-}
-
-func (t *timeoutDropper) IncrementCompletedRequests() {
-	if t.base != nil {
-		t.base.IncrementCompletedRequests()
-	}
-}
-
-func (t *timeoutDropper) IncrementTimeouts() {
-	if t.base != nil {
-		t.base.IncrementTimeouts()
-	}
-	if t.threshold <= 0 {
-		return
-	}
-	newCount := atomic.AddInt64(&t.count, 1)
-	if newCount >= t.threshold && atomic.CompareAndSwapInt32(&t.triggered, 0, 1) {
-		if t.onExceed != nil {
-			t.onExceed()
-		}
-	}
-}
-
-func (t *timeoutDropper) IncrementErrors() {
-	if t.base != nil {
-		t.base.IncrementErrors()
-	}
-}
-
-func (t *timeoutDropper) SetTotalRequests(count int64) {
-	if t.base != nil {
-		t.base.SetTotalRequests(count)
-	}
-}
-
-func (t *timeoutDropper) AddTotalRequests(count int64) {
-	if t.base != nil {
-		t.base.AddTotalRequests(count)
-	}
-}
-
-func (t *timeoutDropper) IncrementCompletedHosts() {
-	if t.base != nil {
-		t.base.IncrementCompletedHosts()
-	}
-}
-
-type wafCancelContext struct {
-	context.Context
-	reason atomic.Value
-}
-
-func (w *wafCancelContext) Value(key interface{}) interface{} {
-	if key == dirscan.CancelReasonKey {
-		if v := w.reason.Load(); v != nil {
-			return v
-		}
-		return nil
-	}
-	return w.Context.Value(key)
-}
-
-func (w *wafCancelContext) setReason(reason string) {
-	w.reason.Store(reason)
-}
-
 func (sc *ScanController) runDirscanModule(ctx context.Context, targets []string) ([]interfaces.HTTPResponse, error) {
 	originalContext := sc.requestProcessor.GetModuleContext()
 	sc.requestProcessor.SetModuleContext("dirscan")
@@ -1734,25 +1660,7 @@ func (sc *ScanController) runDirscanModule(ctx context.Context, targets []string
 		})
 		engine.SetRequestProcessor(workerProcessor)
 
-		baseCtx, baseCancel := context.WithCancel(ctx)
-		runCtx := &wafCancelContext{Context: baseCtx}
-		cancel := baseCancel
-
-		timeoutTracker := &timeoutDropper{
-			base:      workerProcessor.GetStatsUpdater(),
-			threshold: dirscanTimeoutDropThreshold,
-			onExceed: func() {
-				if ctx.Err() != nil {
-					return
-				}
-				runCtx.setReason(dirscan.CancelReasonWAF)
-				logger.Warnf("%s 疑似存在WAF，超时已丢弃", currentTarget)
-				if cancel != nil {
-					cancel()
-				}
-			},
-		}
-		workerProcessor.SetStatsUpdater(timeoutTracker)
+		runCtx, cancel := context.WithCancel(ctx)
 
 		layerScanner := func(layerTargets []string, filter *dirscan.ResponseFilter, depth int) ([]interfaces.HTTPResponse, error) {
 			tempCollector := dirscan.NewRecursionCollector(layerTargets)
@@ -1760,11 +1668,6 @@ func (sc *ScanController) runDirscanModule(ctx context.Context, targets []string
 			recursive := depth > 0
 			scanResult, err := engine.PerformScanWithFilter(runCtx, tempCollector, recursive, filter)
 			if err != nil {
-				if runCtx.Err() != nil {
-					if reason, ok := runCtx.Value(dirscan.CancelReasonKey).(string); ok && reason == dirscan.CancelReasonWAF {
-						return nil, nil
-					}
-				}
 				return nil, err
 			}
 			if scanResult == nil || scanResult.FilterResult == nil {
@@ -1838,7 +1741,7 @@ func (sc *ScanController) runDirscanModule(ctx context.Context, targets []string
 			if firstErr == nil {
 				firstErr = err
 			}
-			logger.Warnf("目标目录扫描失败: %s, %v", currentTarget, err)
+			logger.Warnf("Dirscan failed for target %s: %v", currentTarget, err)
 			continue
 		}
 
@@ -2024,7 +1927,7 @@ func (sc *ScanController) processSingleTargetFingerprintWithContext(ctx context.
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Errorf("指纹识别panic: %v, 目标: %s", r, target)
+				logger.Errorf("Fingerprint panic: %v, target: %s", r, target)
 				resultChan <- nil
 			}
 		}()

@@ -161,6 +161,7 @@ build-windows: ## 编译 Windows 平台（主动模式）
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Windows 平台（主动模式）..."
 	@mkdir -p $(BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=amd64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_windows_amd64.exe $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=arm64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_windows_arm64.exe $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Windows 编译完成"
 
 .PHONY: build-windows-passive
@@ -168,6 +169,7 @@ build-windows-passive: ## 编译 Windows 平台（被动代理模式）
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Windows 平台（被动代理模式）..."
 	@mkdir -p $(PASSIVE_BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=amd64 go build $(BUILDFLAGS) -tags $(PASSIVE_TAG) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(PASSIVE_BUILD_DIR)/$(PROJECT_NAME)_windows_amd64.exe $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=windows GOARCH=arm64 go build $(BUILDFLAGS) -tags $(PASSIVE_TAG) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(PASSIVE_BUILD_DIR)/$(PROJECT_NAME)_windows_arm64.exe $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Windows 被动模式编译完成"
 
 .PHONY: build-windows-both
@@ -178,6 +180,8 @@ build-linux: ## 编译 Linux 平台（主动模式）
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Linux 平台（主动模式）..."
 	@mkdir -p $(BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_linux_amd64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=arm64 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_linux_arm64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=arm GOARM=7 go build $(BUILDFLAGS) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(PROJECT_NAME)_linux_arm $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Linux 编译完成"
 
 .PHONY: build-linux-passive
@@ -185,6 +189,8 @@ build-linux-passive: ## 编译 Linux 平台（被动代理模式）
 	@echo "$(BLUE)[BUILD]$(RESET) 编译 Linux 平台（被动代理模式）..."
 	@mkdir -p $(PASSIVE_BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 go build $(BUILDFLAGS) -tags $(PASSIVE_TAG) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(PASSIVE_BUILD_DIR)/$(PROJECT_NAME)_linux_amd64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=arm64 go build $(BUILDFLAGS) -tags $(PASSIVE_TAG) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(PASSIVE_BUILD_DIR)/$(PROJECT_NAME)_linux_arm64 $(MAIN_FILE)
+	@CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=arm GOARM=7 go build $(BUILDFLAGS) -tags $(PASSIVE_TAG) -gcflags="$(GCFLAGS)" -asmflags="$(ASMFLAGS)" -ldflags="$(LDFLAGS)" -o $(PASSIVE_BUILD_DIR)/$(PROJECT_NAME)_linux_arm $(MAIN_FILE)
 	@echo "$(GREEN)[SUCCESS]$(RESET) Linux 被动模式编译完成"
 
 .PHONY: build-linux-both
