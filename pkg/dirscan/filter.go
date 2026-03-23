@@ -179,6 +179,10 @@ func (rf *ResponseFilter) FilterResponses(responses []*interfaces.HTTPResponse) 
 
 	// 步骤2: Content-Type过滤
 	for _, resp := range step1 {
+		if sharedutils.IsStaticResource(resp.URL) {
+			logger.Debugf("静态资源URL过滤: %s", resp.URL)
+			continue
+		}
 		if !config.EnableContentTypeFilter || !checkContentTypeAgainstRules(resp.ContentType, config.FilteredContentTypes) {
 			step2 = append(step2, resp)
 		}

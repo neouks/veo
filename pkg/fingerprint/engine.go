@@ -264,9 +264,6 @@ func (e *Engine) analyzeResponseInternal(response *HTTPResponse, httpClient http
 	// 检查是否应该过滤此响应
 	if e.config.EnableFiltering && e.shouldFilterResponse(response) {
 		atomic.AddInt64(&e.stats.FilteredRequests, 1)
-		if !silent && emitNoMatch && e.config.OutputFormatter != nil {
-			e.config.OutputFormatter.FormatNoMatch(response)
-		}
 		return nil
 	}
 
@@ -416,18 +413,12 @@ func (e *Engine) shouldFilterResponse(response *HTTPResponse) bool {
 }
 
 func (e *Engine) isStaticFile(rawURL string) bool {
-	if !e.config.StaticFileFilterEnabled || len(e.config.StaticExtensions) == 0 {
+	if !e.config.StaticFileFilterEnabled {
 		return false
 	}
 
-	lowerURL := strings.ToLower(rawURL)
-	for _, ext := range e.config.StaticExtensions {
-		if ext == "" {
-			continue
-		}
-		if strings.HasSuffix(lowerURL, strings.ToLower(ext)) {
-			return true
-		}
+	if shared.IsStaticResource(rawURL) {
+		return true
 	}
 
 	return false
@@ -581,11 +572,15 @@ func getDefaultConfig() *EngineConfig {
 	maxConcurrency := 20
 
 	return &EngineConfig{
-		RulesPath:       "config/fingerprint/",
-		MaxConcurrency:  maxConcurrency,
-		EnableFiltering: true,
-		MaxBodySize:     1024 * 1024, // 1MB
-		LogMatches:      true,
+		RulesPath:                "config/fingerprint/",
+		MaxConcurrency:           maxConcurrency,
+		EnableFiltering:          true,
+		MaxBodySize:              1024 * 1024, // 1MB
+		LogMatches:               true,
+		StaticExtensions:         append([]string(nil), StaticFileExtensions...),
+		StaticContentTypes:       append([]string(nil), StaticContentTypes...),
+		StaticFileFilterEnabled:  true,
+		ContentTypeFilterEnabled: true,
 	}
 }
 

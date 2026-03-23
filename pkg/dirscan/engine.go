@@ -472,8 +472,6 @@ func RunRecursiveScan(
 func ExtractNextLevelTargets(results []interfaces.HTTPResponse, alreadyScanned map[string]bool) []string {
 	var newTargets []string
 	thisRoundTargets := make(map[string]struct{})
-	fileChecker := shared.NewFileExtensionChecker()
-	pathChecker := shared.NewPathChecker()
 
 	for _, resp := range results {
 		if resp.StatusCode != 200 && resp.StatusCode != 403 {
@@ -485,11 +483,7 @@ func ExtractNextLevelTargets(results []interfaces.HTTPResponse, alreadyScanned m
 			continue
 		}
 
-		if fileChecker.IsStaticFile(targetURL) {
-			continue
-		}
-
-		if pathChecker.IsStaticPath(targetURL) {
+		if shared.IsStaticResource(targetURL) {
 			logger.Debugf("跳过黑名单目录: %s", targetURL)
 			continue
 		}

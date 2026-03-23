@@ -523,7 +523,6 @@ jboss-eap:
 
 jeecgboot:
   dsl:
-    - "contains(body,'.app-loading','.app-loading-title','.app-loading-wrap')"
     - "contains(body, 'jeecg-boot','casPrefixUrl')"
     - "contains_all(body, 'absolute','9999999999999','#FFF','Open Sans','load_title')"
 
@@ -3009,6 +3008,8 @@ dify:
   - "icon('/icon-192x192.png', '682948c646ca9e6665a1c2cc9334662d')"
 
 积木报表:
+  path: "/jmreport/desreport_/js/core/api.js"
   tags: red,rce,jmreport
   dsl:
-  - "contains(body, 'jmreport/desreport','desreport','jmreport')"
+  - "contains(body, 'jmreport/desreport','desreport','jmreport','JM_VIEW_IMG_URL','excelQueryByTemplate','queryMapByCodeUseOrigin')"
+

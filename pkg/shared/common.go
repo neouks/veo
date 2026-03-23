@@ -336,13 +336,35 @@ func (c *PathChecker) IsStaticPath(urlPath string) bool {
 
 // IsStaticFile 检查URL是否为静态文件
 func (c *FileExtensionChecker) IsStaticFile(urlPath string) bool {
-	lowerPath := strings.ToLower(urlPath)
+	var pathPart string
+	if strings.Contains(urlPath, "://") || strings.Contains(urlPath, "?") || strings.Contains(urlPath, "#") {
+		if u, err := url.Parse(urlPath); err == nil {
+			pathPart = u.Path
+		} else {
+			pathPart = urlPath
+		}
+	} else {
+		pathPart = urlPath
+	}
+
+	lowerPath := strings.ToLower(pathPart)
 	for _, ext := range c.extensions {
 		if strings.HasSuffix(lowerPath, ext) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsStaticResource 使用统一的静态路径/后缀规则判断资源是否应被视为静态资源。
+func IsStaticResource(rawURL string) bool {
+	pathChecker := NewPathChecker()
+	if pathChecker.IsStaticPath(rawURL) {
+		return true
+	}
+
+	checker := NewFileExtensionChecker()
+	return checker.IsStaticFile(rawURL)
 }
 
 var (

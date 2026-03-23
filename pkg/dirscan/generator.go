@@ -620,20 +620,10 @@ func NewURLCleaner() *URLCleaner {
 }
 
 func (c *URLCleaner) IsStaticResource(rawURL string) bool {
-	lowerURL := strings.ToLower(rawURL)
-
-	pathChecker := shared.NewPathChecker()
-	if pathChecker.IsStaticPath(rawURL) {
+	if shared.IsStaticResource(rawURL) {
 		logger.Debugf("匹配静态目录，过滤: %s", rawURL)
 		return true
 	}
-
-	checker := shared.NewFileExtensionChecker()
-	if checker.IsStaticFile(lowerURL) {
-		logger.Debugf("匹配静态扩展名，过滤: %s", rawURL)
-		return true
-	}
-
 	return false
 }
 
